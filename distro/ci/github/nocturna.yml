@@ -1,0 +1,29 @@
+# Orobas todas las noches contra staging, con más presupuesto y el retest de lo que ya se encontró. El resultado
+# queda en la pestaña de seguridad (sin PR no hay comentario) y en el caché, para comparar con la noche siguiente.
+name: Orobas (nocturna)
+on:
+  schedule:
+    - cron: "17 4 * * *"    # 04:17 UTC
+  workflow_dispatch:
+permissions: {}
+jobs:
+  seguridad:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      security-events: write
+    environment: staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Leandrozz/orobas-sec@REEMPLAZAR-POR-EL-SHA-DEL-TAG # vX.Y.Z
+        with:
+          version: vX.Y.Z
+          autorizacion: ${{ vars.OROBAS_ALCANCE_AUTORIZADO }}
+          comentar: "false"
+          argumentos: --presupuesto 15 --minutos 90 --junit
+        env:
+          OROBAS_API_KEY: ${{ secrets.OROBAS_API_KEY }}
+          STAGING_TOKEN_ALICIA: ${{ secrets.STAGING_TOKEN_ALICIA }}

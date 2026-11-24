@@ -1,0 +1,8 @@
+{
+  "name": "cyber-navegador",
+  "private": true,
+  "description": "Playwright sin navegadores para la imagen (distro/Dockerfile): controla el Chromium del sistema.",
+  "dependencies": {
+    "playwright": "1.64.0"
+  }
+}

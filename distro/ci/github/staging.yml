@@ -1,0 +1,37 @@
+# Orobas en cada PR, contra un staging fijo. Copialo a .github/workflows/orobas.yml de tu repositorio.
+# Necesita: el secreto OROBAS_API_KEY (o la clave de tu proveedor), la variable OROBAS_ALCANCE_AUTORIZADO con la huella
+# del alcance («cyber ci huella») y los secretos de las identidades que nombra .orobas/ci.yml. Guía: docs/ci.md.
+name: Orobas
+on:
+  pull_request:
+  workflow_dispatch:
+# Nada por defecto: cada trabajo pide lo suyo.
+permissions: {}
+concurrency:
+  group: orobas-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  seguridad:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Un PR de un fork no recibe secretos: no se corre (la acción también lo omite por defecto).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read          # leer el repositorio
+      pull-requests: write    # sólo para el comentario del PR
+      security-events: write  # sólo para subir el SARIF
+    environment: staging      # opcional: un environment protegido guarda los secretos y la huella
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0      # para «sólo lo que cambió» (compara con la base del PR)
+      - uses: Leandrozz/orobas-sec@REEMPLAZAR-POR-EL-SHA-DEL-TAG # vX.Y.Z
+        with:
+          version: vX.Y.Z
+          autorizacion: ${{ vars.OROBAS_ALCANCE_AUTORIZADO }}
+        env:
+          OROBAS_API_KEY: ${{ secrets.OROBAS_API_KEY }}
+          STAGING_TOKEN_ALICIA: ${{ secrets.STAGING_TOKEN_ALICIA }}
+          STAGING_BRUNO_EMAIL: ${{ secrets.STAGING_BRUNO_EMAIL }}
+          STAGING_BRUNO_CLAVE: ${{ secrets.STAGING_BRUNO_CLAVE }}

@@ -1,0 +1,231 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/Leandrozz/orobas-sec/blob/main/distro/ci/orobas-ci-resultado.schema.json",
+  "title": "Resultado de una corrida de Orobas en CI (formato orobas-ci/1)",
+  "description": "Lo que escribe «cyber ci» en resultado.json. Estable: un campo nuevo puede aparecer; uno existente no cambia de nombre ni de sentido sin pasar a orobas-ci/2. Referencia: docs/ci.md.",
+  "type": "object",
+  "required": ["formato", "herramienta", "nombre", "modo", "resultado", "corrida", "autorizacion", "alcance", "modelo", "gasto", "tiempo", "trafico", "cobertura", "politica", "hallazgos", "comparacion", "supresiones", "retest", "avisos"],
+  "additionalProperties": false,
+  "properties": {
+    "formato": { "enum": ["orobas-ci/1"] },
+    "herramienta": {
+      "type": "object", "required": ["nombre", "version"], "additionalProperties": false,
+      "properties": { "nombre": { "enum": ["orobas-sec"] }, "version": { "type": "string" } }
+    },
+    "nombre": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$" },
+    "modo": { "enum": ["evaluacion", "retest"] },
+    "resultado": {
+      "type": "object", "required": ["codigo", "estado", "descripcion", "motivo", "bloqueantes"], "additionalProperties": false,
+      "properties": {
+        "codigo": { "enum": [0, 1, 2, 3, 4] },
+        "estado": { "enum": ["ok", "hallazgos", "configuracion", "infraestructura", "incompleto"] },
+        "descripcion": { "type": "string" },
+        "motivo": { "type": "string" },
+        "bloqueantes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "corrida": {
+      "type": "object", "required": ["inicio", "fin", "duracion_s", "sesion", "fin_exploracion"], "additionalProperties": false,
+      "properties": {
+        "inicio": { "type": "string", "format": "date-time" },
+        "fin": { "type": "string", "format": "date-time" },
+        "duracion_s": { "type": "integer", "minimum": 0 },
+        "sesion": { "type": "string" },
+        "repositorio": { "type": "string" },
+        "commit": { "type": "string" },
+        "ref": { "type": "string" },
+        "evento": { "type": "string" },
+        "pr": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string" },
+        "fin_exploracion": { "enum": ["cierre", "presupuesto", "tiempo", "pasos", "sin-avance", "proveedor", "sin-saldo", "no-corrio", "retest"] }
+      }
+    },
+    "autorizacion": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object", "required": ["huella", "fuente", "archivo", "huella_archivo"], "additionalProperties": false,
+          "properties": {
+            "huella": { "type": "string", "pattern": "^sha256:[0-9a-f]{32}$" },
+            "fuente": { "type": "string" },
+            "archivo": { "type": "string" },
+            "huella_archivo": { "type": "string", "pattern": "^sha256:[0-9a-f]{32}$" },
+            "ref": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "alcance": {
+      "type": "object", "required": ["incluido", "excluido", "reglas", "acotado_a_cambios"], "additionalProperties": false,
+      "properties": {
+        "incluido": { "type": "array", "items": { "type": "string" } },
+        "excluido": { "type": "array", "items": { "type": "string" } },
+        "reglas": {
+          "type": "array",
+          "items": { "type": "object", "required": ["destino", "tipo", "valor"], "additionalProperties": false, "properties": { "destino": { "type": "string" }, "tipo": { "enum": ["url", "host", "cidr"] }, "valor": { "type": "string" } } }
+        },
+        "acotado_a_cambios": { "type": "boolean" }
+      }
+    },
+    "modelo": {
+      "type": "object", "required": ["nombre", "modelos_usados", "router"], "additionalProperties": false,
+      "properties": { "nombre": { "type": "string" }, "modelos_usados": { "type": "array", "items": { "type": "string" } }, "router": { "type": "string" } }
+    },
+    "gasto": {
+      "type": "object", "required": ["usd", "tope_usd", "verificacion_usd", "solicitudes", "solicitudes_sin_costo", "tokens"], "additionalProperties": false,
+      "properties": {
+        "usd": { "$ref": "#/definitions/importe" },
+        "tope_usd": { "$ref": "#/definitions/importe" },
+        "verificacion_usd": { "$ref": "#/definitions/importe" },
+        "solicitudes": { "type": "integer", "minimum": 0 },
+        "solicitudes_sin_costo": { "type": "integer", "minimum": 0 },
+        "tokens": {
+          "type": "object", "required": ["entrada", "cache_lectura", "cache_escritura", "salida"], "additionalProperties": false,
+          "properties": { "entrada": { "type": "integer", "minimum": 0 }, "cache_lectura": { "type": "integer", "minimum": 0 }, "cache_escritura": { "type": "integer", "minimum": 0 }, "salida": { "type": "integer", "minimum": 0 } }
+        }
+      }
+    },
+    "tiempo": {
+      "type": "object", "required": ["tope_min", "duracion_s"], "additionalProperties": false,
+      "properties": { "tope_min": { "type": "number", "minimum": 0 }, "duracion_s": { "type": "integer", "minimum": 0 } }
+    },
+    "trafico": {
+      "type": "object", "required": ["peticiones", "bloqueadas_por_alcance", "intentos_fuera_de_alcance", "solo_lectura", "hosts"], "additionalProperties": false,
+      "properties": {
+        "peticiones": { "type": "integer", "minimum": 0 },
+        "bloqueadas_por_alcance": { "type": "integer", "minimum": 0 },
+        "intentos_fuera_de_alcance": { "type": "array", "items": { "type": "string" } },
+        "solo_lectura": { "type": "boolean" },
+        "hosts": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "cobertura": {
+      "type": "object", "required": ["probadas", "sin_probar", "solo_cambios"], "additionalProperties": false,
+      "properties": {
+        "probadas": { "type": "array", "items": { "type": "string" } },
+        "sin_probar": { "type": "array", "items": { "type": "string" } },
+        "solo_cambios": {
+          "type": "object", "required": ["activo", "motivo", "rutas", "archivos_sin_ruta"], "additionalProperties": false,
+          "properties": {
+            "activo": { "type": "boolean" },
+            "motivo": { "type": "string" },
+            "base": { "type": "string" },
+            "rutas": { "type": "array", "items": { "type": "object", "required": ["ruta", "archivo"], "additionalProperties": false, "properties": { "ruta": { "type": "string" }, "archivo": { "type": "string" }, "linea": { "type": "integer", "minimum": 1 } } } },
+            "archivos_sin_ruta": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "politica": {
+      "type": "object", "required": ["fallar_desde", "solo_nuevos"], "additionalProperties": false,
+      "properties": { "fallar_desde": { "enum": ["informativa", "baja", "media", "alta", "critica", "nunca"] }, "solo_nuevos": { "type": "boolean" } }
+    },
+    "hallazgos": { "type": "array", "items": { "$ref": "#/definitions/hallazgo" } },
+    "comparacion": {
+      "type": "object", "required": ["anterior", "nuevos", "persisten", "resueltos", "sin_confirmar"], "additionalProperties": false,
+      "properties": {
+        "anterior": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "required": ["sesion", "fin"], "additionalProperties": false, "properties": { "sesion": { "type": "string" }, "fin": { "type": "string" }, "commit": { "type": "string" } } }
+          ]
+        },
+        "nuevos": { "$ref": "#/definitions/huellas" },
+        "persisten": { "$ref": "#/definitions/huellas" },
+        "resueltos": { "$ref": "#/definitions/huellas" },
+        "sin_confirmar": { "$ref": "#/definitions/huellas" }
+      }
+    },
+    "supresiones": {
+      "type": "object", "required": ["archivo", "aplicadas", "vencidas", "sin_uso"], "additionalProperties": false,
+      "properties": {
+        "archivo": { "type": "string" },
+        "aplicadas": { "$ref": "#/definitions/huellas" },
+        "vencidas": { "type": "array", "items": { "type": "object", "required": ["huella", "motivo", "autor", "vence"], "additionalProperties": false, "properties": { "huella": { "$ref": "#/definitions/huella" }, "motivo": { "type": "string" }, "autor": { "type": "string" }, "vence": { "$ref": "#/definitions/fecha" } } } },
+        "sin_uso": { "$ref": "#/definitions/huellas" }
+      }
+    },
+    "retest": { "type": "array", "items": { "$ref": "#/definitions/retest" } },
+    "avisos": { "type": "array", "items": { "type": "string" } }
+  },
+  "definitions": {
+    "importe": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "huella": { "type": "string", "pattern": "^orobas:v1:[0-9a-f]{24}$" },
+    "huellas": { "type": "array", "items": { "$ref": "#/definitions/huella" } },
+    "fecha": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "severidad": { "enum": ["informativa", "baja", "media", "alta", "critica"] },
+    "clase": {
+      "type": "object", "required": ["id", "nombre"], "additionalProperties": false,
+      "properties": { "id": { "type": "string" }, "nombre": { "type": "string" }, "cwe": { "type": "integer", "minimum": 1 } }
+    },
+    "supresion": {
+      "type": "object", "required": ["motivo", "autor", "vence"], "additionalProperties": false,
+      "properties": { "motivo": { "type": "string" }, "autor": { "type": "string" }, "vence": { "$ref": "#/definitions/fecha" } }
+    },
+    "paso": {
+      "type": "object", "required": ["metodo", "url", "cabeceras", "curl", "artefacto"], "additionalProperties": false,
+      "properties": {
+        "metodo": { "type": "string" },
+        "url": { "type": "string" },
+        "cabeceras": { "type": "object", "additionalProperties": { "type": "string" } },
+        "cuerpo": { "type": "string" },
+        "identidad": { "type": "string" },
+        "curl": { "type": "string" },
+        "respuesta": {
+          "type": "object", "required": ["estado", "cabeceras", "extracto", "recortado"], "additionalProperties": false,
+          "properties": { "estado": { "type": "integer" }, "cabeceras": { "type": "object", "additionalProperties": { "type": "string" } }, "extracto": { "type": "string" }, "recortado": { "type": "boolean" } }
+        },
+        "error": { "type": "string" },
+        "artefacto": { "type": "string" }
+      }
+    },
+    "hallazgo": {
+      "type": "object",
+      "required": ["huella", "id", "estado", "severidad", "clase", "clase_declarada", "titulo", "activo", "destino", "metodo", "ruta", "consulta", "resumen", "limites", "motivo", "decidido_por", "comparacion", "bloqueante", "reproduccion", "evidencia"],
+      "additionalProperties": false,
+      "properties": {
+        "huella": { "$ref": "#/definitions/huella" },
+        "id": { "type": "string" },
+        "estado": { "enum": ["verificado", "candidato", "descartado", "pista"] },
+        "severidad": { "$ref": "#/definitions/severidad" },
+        "clase": { "$ref": "#/definitions/clase" },
+        "clase_declarada": { "type": "string" },
+        "titulo": { "type": "string" },
+        "activo": { "type": "string" },
+        "destino": { "type": "string" },
+        "metodo": { "type": "string" },
+        "ruta": { "type": "string" },
+        "consulta": { "type": "array", "items": { "type": "string" } },
+        "resumen": { "type": "string" },
+        "limites": { "type": "string" },
+        "motivo": { "type": "string" },
+        "decidido_por": { "type": "string" },
+        "comparacion": { "enum": ["nuevo", "persiste", "sin-anterior"] },
+        "supresion": { "$ref": "#/definitions/supresion" },
+        "bloqueante": { "type": "boolean" },
+        "reproduccion": { "type": "array", "items": { "$ref": "#/definitions/paso" } },
+        "verificacion": {
+          "type": "object", "additionalProperties": false,
+          "properties": { "prueba": { "$ref": "#/definitions/paso" }, "control": { "$ref": "#/definitions/paso" }, "costo_usd": { "$ref": "#/definitions/importe" } }
+        },
+        "evidencia": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "retest": {
+      "type": "object", "required": ["huella", "titulo", "severidad", "clase", "resultado", "motivo", "bloqueante"], "additionalProperties": false,
+      "properties": {
+        "huella": { "$ref": "#/definitions/huella" },
+        "titulo": { "type": "string" },
+        "severidad": { "$ref": "#/definitions/severidad" },
+        "clase": { "$ref": "#/definitions/clase" },
+        "resultado": { "enum": ["arreglado", "persiste", "sin-confirmar"] },
+        "motivo": { "type": "string" },
+        "repeticion": { "$ref": "#/definitions/paso" },
+        "prueba": { "$ref": "#/definitions/paso" },
+        "control": { "$ref": "#/definitions/paso" },
+        "bloqueante": { "type": "boolean" },
+        "supresion": { "$ref": "#/definitions/supresion" }
+      }
+    }
+  }
+}

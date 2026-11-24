@@ -1,0 +1,104 @@
+{
+  "source": "orobas_boot_demo.gif",
+  "source_sha256": "b40abfe2f6323b210a49915f38ebad0211a01a33281b5ef52ac2530b2f40340d",
+  "source_crop_xyxy": [
+    163,
+    132,
+    943,
+    792
+  ],
+  "padding_px": 20,
+  "size_px": [
+    820,
+    700
+  ],
+  "background_rgb": [
+    9,
+    14,
+    22
+  ],
+  "duration_ms": 2540,
+  "loop": false,
+  "frames": [
+    {
+      "file": "frames-transparentes/000.png",
+      "duration_ms": 120,
+      "start_ms": 0,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/001.png",
+      "duration_ms": 120,
+      "start_ms": 120,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/002.png",
+      "duration_ms": 120,
+      "start_ms": 240,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/003.png",
+      "duration_ms": 120,
+      "start_ms": 360,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/004.png",
+      "duration_ms": 120,
+      "start_ms": 480,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/005.png",
+      "duration_ms": 120,
+      "start_ms": 600,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/006.png",
+      "duration_ms": 120,
+      "start_ms": 720,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/007.png",
+      "duration_ms": 120,
+      "start_ms": 840,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/008.png",
+      "duration_ms": 120,
+      "start_ms": 960,
+      "phase": "reconstruction"
+    },
+    {
+      "file": "frames-transparentes/009.png",
+      "duration_ms": 220,
+      "start_ms": 1080,
+      "phase": "color"
+    },
+    {
+      "file": "frames-transparentes/010.png",
+      "duration_ms": 220,
+      "start_ms": 1300,
+      "phase": "color"
+    },
+    {
+      "file": "frames-transparentes/011.png",
+      "duration_ms": 1020,
+      "start_ms": 1520,
+      "phase": "color"
+    }
+  ],
+  "final_image": "frames-transparentes/011.png",
+  "behavior": {
+    "startup": "Play frames once, then enter chat.",
+    "empty_chat": "Show the final image. Do not replay the animation.",
+    "typing": "Keep showing the final image until a message is sent.",
+    "first_message_sent": "Hide the image and show the conversation.",
+    "chat_cleared": "Show the final image again."
+  }
+}

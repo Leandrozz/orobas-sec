@@ -1,0 +1,593 @@
+#!/bin/sh
+# Lanzador de Elevate AI Cyber para Linux y macOS: busca actualizaciones, arranca Docker,
+# monta proyecto, credenciales y datos, pasa la llave de cifrado del llavero y abre la TUI.
+# Uso: cyber [--instalar | --actualizar [--si] | --resumen | args del usuario]
+# Se instala con install.sh desde un release firmado (README, «Instalar»), nunca desde main.
+VERSION_LANZADOR=''  # la completa el release (scripts/release/armar.sh); vacía en una copia de desarrollo
+IMAGEN_RELEASE=''    # la imagen que fija ese release, por digest; vacía en una copia de desarrollo
+IMAGEN=${CYBER_IMAGE:-${IMAGEN_RELEASE:-ghcr.io/leandrozz/elevate-cyber:latest}}
+# --actualizar sólo reemplaza este archivo por el del último release, después de verificar la firma de su
+# SHA256SUMS con esta clave (ssh-keygen -Y verify) y la suma del lanzador. CYBER_RELEASES_URL cambia de dónde baja.
+RELEASES_URL=${CYBER_RELEASES_URL:-https://github.com/Leandrozz/orobas-sec/releases}
+CLAVE_PUBLICA='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFfKpWK3+u7xt/H1nXdYudXF4DWUorU16LWu7ACfcP+R'
+ESPACIO_FIRMA=orobas-sec-release
+# Estado propio, vacío al arrancar: nada del entorno decide si se cierra Docker Desktop al salir (ABRI), si la corrida
+# sólo actualiza (ACTUALIZAR), qué entra por stdin a los comandos con límite (ENT), ni los avisos y el reintento.
+ABRI=
+ACTUALIZAR=
+ENT=
+LLAVERO_MAL=
+REINTENTO=
+
+case "${LC_ALL:-${LC_MESSAGES:-$LANG}}" in es*) ES=1 ;; *) ES= ;; esac
+t() { if [ -n "$ES" ]; then printf '%s' "$1"; else printf '%s' "$2"; fi; }
+# Pregunta por stdin; Enter es sí, y sin entrada (EOF) es no.
+si() { printf '%s [%s] ' "$1" "$(t 'S/n' 'Y/n')" >&2; read -r r || return 1; case $r in '' | s | S | y | Y) return 0 ;; *) return 1 ;; esac; }
+
+SO=$(uname 2>/dev/null)
+CRED=${XDG_CONFIG_HOME:-$HOME/.config}/elevate-cyber
+
+# Preferencia de cerrar Docker Desktop al salir si lo abrió el lanzador: CYBER_CERRAR_DOCKER=0|1 gana sobre lanzador.conf; por defecto sí.
+cerrar_pref() {
+  case $CYBER_CERRAR_DOCKER in 0) return 1 ;; 1) return 0 ;; esac
+  ! grep -qx 'cerrar_docker=no' "$CRED/lanzador.conf" 2>/dev/null
+}
+
+# ¿La versión $1 es anterior a la $2? (vX.Y.Z; lo que sigue a «-» no cuenta). Una versión vacía es anterior a todas.
+version_menor() {
+  [ -n "$1" ] || return 0
+  [ -n "$2" ] || return 1
+  va=${1#v}; va=${va%%-*}; vb=${2#v}; vb=${vb%%-*}
+  for _ in 1 2 3; do
+    x=${va%%.*}; y=${vb%%.*}
+    [ "$x" -lt "$y" ] && return 0
+    [ "$x" -gt "$y" ] && return 1
+    va=${va#*.}; vb=${vb#*.}
+  done
+  return 1
+}
+
+suma256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
+
+# El último release publicado: GitHub redirige /releases/latest a /releases/tag/vX.Y.Z. https siempre; http sólo a esta máquina (pruebas).
+proto_releases() { case $RELEASES_URL in https://*) echo '=https' ;; http://127.0.0.1:* | http://localhost:*) echo '=http,https' ;; *) return 1 ;; esac; }
+ultimo_release() {
+  p=$(proto_releases) || return 1
+  u=$(curl -fsSIL --proto "$p" --proto-redir "$p" --connect-timeout 15 --max-time "${1:-60}" -o /dev/null -w '%{url_effective}' "$RELEASES_URL/latest" 2>/dev/null) || return 1
+  v=${u##*/tag/}
+  printf '%s\n' "$v" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || return 1
+  printf '%s' "$v"
+}
+
+# --actualizar: busca el último release; si es más nuevo, baja SHA256SUMS y su firma, verifica la firma con la
+# clave de arriba, baja cyber-lanzador.sh, compara su suma con la firmada y revisa la sintaxis; recién entonces
+# pregunta y se reemplaza (mv, nunca a medio escribir). Cualquier falla deja el que está y sale con error.
+# Sin terminal no se reemplaza solo, salvo con --si.
+actualizar_lanzador() {
+  if [ "$1" != --si ] && [ ! -t 0 ]; then
+    echo "$(t 'Sin terminal no reemplazo el lanzador (sólo actualizo la imagen). Para hacerlo igual: cyber --actualizar --si' 'Without a terminal I do not replace the launcher (only the image). To do it anyway: cyber --actualizar --si')" >&2
+    return 0
+  fi
+  case $CLAVE_PUBLICA in
+  *REEMPLAZAR*)
+    echo "$(t 'Este lanzador es una copia de desarrollo (sin la clave de los releases): no se reemplaza solo. Instalá uno de un release (README).' 'This launcher is a development copy (no release key): it does not replace itself. Install one from a release (README).')" >&2
+    return 0 ;;
+  esac
+  for h in curl ssh-keygen; do
+    command -v $h >/dev/null 2>&1 || { echo "$(t "Falta $h: sin él no puedo verificar el lanzador nuevo." "$h is missing: without it I cannot verify the new launcher.")" >&2; return 1; }
+  done
+  ua=$(mktemp -d) || return 1
+  actualizar_lanzador_en "$ua" "$1"
+  ur=$?
+  rm -rf "$ua"
+  return $ur
+}
+actualizar_lanzador_en() {
+  d=$1
+  nuevo=$(ultimo_release) || { echo "$(t 'No pude consultar el último release en' 'Could not check the latest release at') $RELEASES_URL/latest" >&2; return 1; }
+  if [ "$nuevo" = "$VERSION_LANZADOR" ]; then
+    echo "$(t 'El lanzador ya está al día' 'The launcher is up to date') ($nuevo)."
+    return 0
+  fi
+  if version_menor "$nuevo" "$VERSION_LANZADOR"; then
+    echo "$(t 'El último release publicado es más viejo que este lanzador; no bajo de versión:' 'The latest published release is older than this launcher; not downgrading:') $nuevo < $VERSION_LANZADOR"
+    return 0
+  fi
+  p=$(proto_releases) || return 1
+  b="$RELEASES_URL/download/$nuevo"
+  for f in SHA256SUMS SHA256SUMS.sig; do
+    curl -fsSL --proto "$p" --proto-redir "$p" --connect-timeout 15 --max-time 120 -o "$d/$f" "$b/$f" 2>/dev/null || {
+      echo "$(t 'No pude bajar' 'Could not download') $b/$f; $(t 'sigue el lanzador que tenés.' 'keeping the current launcher.')" >&2
+      return 1
+    }
+  done
+  printf 'orobas-sec namespaces="%s" %s\n' "$ESPACIO_FIRMA" "$CLAVE_PUBLICA" >"$d/firmantes"
+  if ! ssh-keygen -Y verify -f "$d/firmantes" -I orobas-sec -n "$ESPACIO_FIRMA" -s "$d/SHA256SUMS.sig" <"$d/SHA256SUMS" >"$d/firma" 2>&1 ||
+    ! awk -v f="orobas-sec-$nuevo.tar.gz" '$2 == f' "$d/SHA256SUMS" | grep -q .; then
+    echo "$(t "La firma del release $nuevo no es válida para la clave de este lanzador: no lo reemplazo." "The signature of release $nuevo is not valid for this launcher's key: not replacing it.")" >&2
+    return 1
+  fi
+  esperada=$(awk 'length($1) == 64 && $2 == "cyber-lanzador.sh" && NF == 2 { print $1 }' "$d/SHA256SUMS")
+  [ -n "$esperada" ] || { echo "$(t "El release $nuevo no trae el lanzador (cyber-lanzador.sh): sigue el que tenés." "Release $nuevo has no launcher (cyber-lanzador.sh): keeping the current one.")" >&2; return 1; }
+  curl -fsSL --proto "$p" --proto-redir "$p" --connect-timeout 15 --max-time 120 -o "$d/cyber" "$b/cyber-lanzador.sh" 2>/dev/null || {
+    echo "$(t 'No pude bajar el lanzador nuevo; sigue el que tenés.' 'Could not download the new launcher; keeping the current one.')" >&2
+    return 1
+  }
+  if [ "$(suma256 "$d/cyber")" != "$esperada" ] || [ "$(head -c 9 "$d/cyber")" != '#!/bin/sh' ] || ! sh -n "$d/cyber" 2>/dev/null; then
+    echo "$(t 'El lanzador que bajó no coincide con la suma firmada: no lo reemplazo.' 'The downloaded launcher does not match the signed checksum: not replacing it.')" >&2
+    return 1
+  fi
+  if [ "$2" != --si ]; then
+    si "$(t "¿Actualizo el lanzador de ${VERSION_LANZADOR:-desarrollo} a $nuevo?" "Update the launcher from ${VERSION_LANZADOR:-development} to $nuevo?")" || return 0
+  fi
+  # Al lado del instalado y con mv: el sh que está corriendo este archivo sigue leyendo el viejo.
+  destino=$(dirname "$0")/.cyber-nuevo.$$
+  cp "$d/cyber" "$destino" && chmod 755 "$destino" && mv -f "$destino" "$0" || {
+    rm -f "$destino"
+    echo "$(t 'No pude escribir el lanzador nuevo en' 'Could not write the new launcher to') $0" >&2
+    return 1
+  }
+  echo "$(t 'Lanzador actualizado a' 'Launcher updated to') $nuevo."
+  rm -rf "$d"
+  exec sh "$0" --actualizar-imagen
+}
+
+case "$1" in
+--cerrar-docker)
+  case $2 in
+  si | no)
+    mkdir -p "$CRED" && chmod 700 "$CRED" && printf 'cerrar_docker=%s\n' "$2" >"$CRED/lanzador.conf" || exit 1
+    echo "$(t 'Guardado: cerrar Docker Desktop al salir, si lo abrió cyber:' 'Saved: close Docker Desktop on exit, if cyber opened it:') $2" ;;
+  *)
+    if cerrar_pref; then e=$(t sí yes); else e=no; fi
+    echo "$(t 'Cerrar Docker Desktop al salir, si lo abrió cyber:' 'Close Docker Desktop on exit, if cyber opened it:') $e ($(t 'cambiar con' 'change with') cyber --cerrar-docker si|no)" ;;
+  esac
+  exit 0 ;;
+--instalar)
+  mkdir -p "$HOME/.local/bin" && cp "$0" "$HOME/.local/bin/cyber" && chmod +x "$HOME/.local/bin/cyber" || exit 1
+  echo "$(t 'Instalado en' 'Installed at') $HOME/.local/bin/cyber"
+  exit 0 ;;
+--actualizar)
+  ACTUALIZAR=1
+  actualizar_lanzador "$2" || exit 1 ;;
+# Después de reemplazarse, el lanzador nuevo baja su imagen (la que fija su release) sin volver a buscarse.
+--actualizar-imagen) ACTUALIZAR=1 ;;
+esac
+
+command -v docker >/dev/null 2>&1 || {
+  echo "$(t 'Falta Docker. Instalalo desde' 'Docker is missing. Install it from') https://docs.docker.com/get-docker/" >&2
+  exit 1
+}
+
+TMP=$(mktemp -d) || exit 1
+# El eco se restaura aunque se interrumpa el pedido del token; Docker Desktop se cierra si lo abrió el lanzador (el vigilante sigue solo y espera a los demás).
+trap 'stty echo 2>/dev/null; [ -z "$ABRI" ] || cerrar_docker; rm -rf "$TMP"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Carpetas del host.
+if [ "$SO" = Darwin ]; then DATOS="$HOME/Library/Application Support/elevate-cyber"; else DATOS=${XDG_DATA_HOME:-$HOME/.local/share}/elevate-cyber; fi
+mkdir -p "$CRED" "$DATOS" && chmod 700 "$CRED" "$DATOS" || exit 1
+
+# Corre "$@" con la salida en $TMP/salida y lo corta a los $1 segundos (código 124); falla si el comando falló.
+limite() {
+  seg=$1
+  shift
+  "$@" >"$TMP/salida" 2>"$TMP/err" <"${ENT:-/dev/null}" &
+  p=$!
+  n=0
+  while kill -0 "$p" 2>/dev/null; do
+    n=$((n + 1))
+    [ $n -gt "$seg" ] && { kill "$p" 2>/dev/null; return 124; }
+    sleep 1
+  done
+  wait "$p"
+}
+
+# Cierra Docker Desktop solo si lo abrió este lanzador (ABRI), la preferencia lo permite y no queda ningún contenedor corriendo.
+# Con el servicio de sistema en Linux no se toca: pediría sudo al salir.
+cerrar_docker() {
+  [ -n "$ABRI" ] && cerrar_pref || return 0
+  limite 10 docker ps -q || return 0
+  [ ! -s "$TMP/salida" ] || return 0
+  if limite 30 docker desktop stop; then :
+  elif [ "$SO" = Darwin ]; then osascript -e 'quit app "Docker"' >/dev/null 2>&1
+  elif systemctl --user list-unit-files docker-desktop.service 2>/dev/null | grep -q docker-desktop; then systemctl --user stop docker-desktop
+  else return 0; fi
+  echo "$(t 'Cerré Docker Desktop porque lo había abierto cyber (desactivalo con: cyber --cerrar-docker no).' 'I closed Docker Desktop because cyber had opened it (turn it off with: cyber --cerrar-docker no).')" >&2
+}
+
+# Vigilante (lo lanza el propio lanzador, aparte de la ventana): si el lanzador muere, despide su ventana en el contenedor compartido (no lo detiene).
+# Si el lanzador abrió Docker Desktop, espera a que no quede ningún cyber-p-* y recién ahí lo cierra.
+if [ "$1" = --vigilar ]; then
+  trap '' HUP
+  trap 'exit 0' TERM
+  trap 'rm -rf "$TMP"' EXIT
+  ABRI=$5
+  while kill -0 "$2" 2>/dev/null; do sleep 2 & wait $!; done
+  limite 15 docker exec "$3" /opt/elevate-cyber/bin/cyber despedir-ventana "$4" # un contenedor que ya no existe da error y se ignora
+  if [ -n "$ABRI" ]; then
+    while limite 10 docker ps --filter name=cyber-p- -q && [ -s "$TMP/salida" ]; do sleep 30 & wait $!; done
+    cerrar_docker
+  fi
+  exit 0
+fi
+
+# En Linux con llavero, el token de ghcr.io vive ahí (usuario:token) y no en ~/.docker/config.json.
+# Un llavero bloqueado o sin D-Bus no debe colgar el arranque: todo secret-tool va con límite.
+HAYST=
+[ "$SO" = Linux ] && command -v secret-tool >/dev/null 2>&1 && HAYST=1
+KR=$HAYST
+GHCR=
+if [ -n "$KR" ]; then
+  if limite 5 secret-tool lookup service elevate-cyber account ghcr; then GHCR=$(cat "$TMP/salida"); fi
+fi
+# El secreto pasa por stdin desde un archivo 0700 que se borra enseguida (limite corre en segundo plano y no hereda stdin).
+guardar_st() {
+  gd=$(mktemp -d "$TMP/dc.XXXXXX") || return 1
+  printf '%s' "$1" >"$gd/ent"
+  shift
+  ENT="$gd/ent"
+  limite 5 secret-tool store "$@"
+  gr=$?
+  ENT=
+  rm -rf "$gd"
+  return "$gr"
+}
+guardar_gh() { guardar_st "$1" --label "Elevate AI Cyber · ghcr.io" service elevate-cyber account ghcr; }
+
+# Un Docker Desktop colgado no debe colgar el lanzador.
+if ! limite 10 docker info; then
+  si "$(t 'Docker no está andando. ¿Lo abro?' "Docker isn't running. Open it?")" || {
+    echo "$(t 'Abrí Docker y volvé a correr cyber.' 'Open Docker and run cyber again.')" >&2
+    exit 1
+  }
+  ABRI=1
+  if [ "$SO" = Darwin ]; then
+    open -a Docker
+  elif systemctl --user list-unit-files docker-desktop.service 2>/dev/null | grep -q docker-desktop; then
+    systemctl --user start docker-desktop
+  else
+    sudo systemctl start docker
+  fi
+  n=0
+  until limite 10 docker info; do
+    n=$((n + 1))
+    [ $n -gt 30 ] && { echo "$(t 'Docker no arrancó.' 'Docker did not start.')" >&2; exit 1; }
+    sleep 2
+  done
+fi
+
+# Prepara un DOCKER_CONFIG temporal (dentro de $TMP, que el trap borra) con el login de ghcr.io del llavero.
+# Sin credenciales no hace nada. Devuelve 99 si ghcr.io rechazó el token y 98 si el login falló por otra causa.
+# Sin subshell ni fork entre limite y docker: así el corte de limite mata al docker de verdad.
+auth_ini() {
+  AUTH_DC=
+  [ -n "$GHCR" ] || return 0
+  dc=$(mktemp -d "$TMP/dc.XXXXXX") && chmod 700 "$dc" || return 1
+  # Con otro DOCKER_CONFIG se pierden los contextos y los plugins (buildx): se enlazan.
+  ctx=
+  limite 5 docker context show && ctx=$(tr -d '\n' <"$TMP/salida")
+  # Los DOCKER_CONFIG y DOCKER_CONTEXT del usuario (definidos o no) se restauran tal cual en auth_fin.
+  UC_SET=${DOCKER_CONFIG+x} UC=$DOCKER_CONFIG UX_SET=${DOCKER_CONTEXT+x} UX=$DOCKER_CONTEXT
+  AUTH_DC=$dc
+  [ -d "$HOME/.docker/cli-plugins" ] && ln -s "$HOME/.docker/cli-plugins" "$dc/cli-plugins"
+  [ -d "$HOME/.docker/contexts" ] && ln -s "$HOME/.docker/contexts" "$dc/contexts"
+  # credsStore vacío: un helper autodetectado no debe guardar el login fuera de la carpeta temporal.
+  printf '{"auths":{},"credsStore":""}' >"$dc/config.json"
+  printf '%s' "${GHCR#*:}" >"$dc/.p"
+  DOCKER_CONFIG=$dc
+  export DOCKER_CONFIG
+  [ -z "$ctx" ] || { DOCKER_CONTEXT=$ctx; export DOCKER_CONTEXT; }
+  ENT="$dc/.p"
+  limite 15 docker login ghcr.io -u "${GHCR%%:*}" --password-stdin
+  lr=$?
+  ENT=
+  rm -f "$dc/.p"
+  [ "$lr" = 0 ] && return 0
+  if grep -Eqi 'unauthorized|denied|(status|HTTP)([^0-9]|/[0-9.]+ )*401' "$TMP/err"; then lr=99; else lr=98; fi
+  auth_fin
+  return "$lr"
+}
+# Solo actúa si auth_ini creó una carpeta temporal (y nunca borra fuera de $TMP).
+auth_fin() {
+  [ -n "$AUTH_DC" ] || return 0
+  case $AUTH_DC in "$TMP"/dc.*) rm -rf "$AUTH_DC" ;; esac
+  AUTH_DC=
+  if [ -n "$UC_SET" ]; then DOCKER_CONFIG=$UC; export DOCKER_CONFIG; else unset DOCKER_CONFIG; fi
+  if [ -n "$UX_SET" ]; then DOCKER_CONTEXT=$UX; export DOCKER_CONTEXT; else unset DOCKER_CONTEXT; fi
+}
+# Corre "$@" ya autenticado (en primer plano) y limpia.
+auth() {
+  auth_ini || return $?
+  "$@"
+  ar=$?
+  auth_fin
+  return "$ar"
+}
+# Igual, pero "$@" corre con límite de $1 segundos.
+auth_limite() {
+  auth_ini || return $?
+  limite "$@"
+  ar=$?
+  auth_fin
+  return "$ar"
+}
+
+# Token de GitHub guardado sin cifrar en ~/.docker/config.json: se ofrece pasarlo al llavero una sola vez.
+migrar() {
+  [ -n "$KR" ] && [ -z "$GHCR" ] && [ ! -e "$CRED/.token-plano" ] && [ -f "$HOME/.docker/config.json" ] || return 0
+  c=$(tr -d ' \n\t\r' <"$HOME/.docker/config.json")
+  # shortcut: cualquier credsStore/credHelpers se toma como que ghcr.io ya está cubierto; afinar si aparece un caso real.
+  case $c in *'"credsStore"'* | *'"credHelpers"'*) return 0 ;; esac
+  a=$(printf '%s' "$c" | grep -o '"ghcr.io":{"auth":"[^"]*"' | sed 's/.*"auth":"//; s/"$//')
+  [ -n "$a" ] || return 0
+  : >"$CRED/.token-plano"
+  si "$(t 'Tu token de GitHub está guardado sin cifrar en ~/.docker/config.json. ¿Lo paso al llavero?' 'Your GitHub token is stored unencrypted in ~/.docker/config.json. Move it to the keyring?')" || return 0
+  GHCR=$(printf '%s' "$a" | base64 -d 2>/dev/null)
+  case $GHCR in ?*:?*) ;; *) GHCR=; return 0 ;; esac
+  if auth true && guardar_gh "$GHCR"; then
+    docker logout ghcr.io >/dev/null 2>&1
+  else
+    GHCR=
+    echo "$(t 'No pude pasar el token al llavero; queda como estaba.' 'Could not move the token to the keyring; it stays as it was.')" >&2
+  fi
+}
+
+traer() {
+  # tee: se ve el avance de la descarga y además se puede buscar el rechazo de autorización.
+  { auth docker pull "$IMAGEN" 2>&1; echo $? >"$TMP/rc"; } | tee "$TMP/pull" >&2
+  rc=$(cat "$TMP/rc")
+  [ "$rc" = 0 ] && return 0
+  # Solo un rechazo de ghcr.io cuenta como token malo; sin red u otro fallo se conservan las credenciales.
+  [ "$rc" = 99 ] || grep -Eqi 'unauthorized|denied|(status|HTTP)([^0-9]|/[0-9.]+ )*401' "$TMP/pull" || {
+    [ "$rc" = 98 ] && echo "$(t 'No pude conectar con ghcr.io.' 'Could not reach ghcr.io.')" >&2
+    return 1
+  }
+  [ -n "$GHCR" ] && echo "$(t 'El token de GitHub guardado ya no sirve: ingresá uno nuevo.' 'The saved GitHub token no longer works: enter a new one.')" >&2
+  echo "$(t 'Creá un token (read:packages) en' 'Create a token (read:packages) at') https://github.com/settings/tokens/new?scopes=read:packages" >&2
+  printf '%s ' "$(t 'Usuario de GitHub:' 'GitHub user:')" >&2
+  read -r usuario
+  printf '%s ' "$(t 'Token (read:packages):' 'Token (read:packages):')" >&2
+  [ -t 0 ] && stty -echo 2>/dev/null
+  read -r token
+  [ -t 0 ] && stty echo 2>/dev/null
+  if [ -z "$usuario" ] || [ -z "$token" ]; then
+    echo "$(t 'Sin usuario o token no puedo iniciar sesión en ghcr.io.' 'Without a user and token I cannot log in to ghcr.io.')" >&2
+    return 1
+  fi
+  if [ -n "$KR" ]; then
+    # Se valida con el login temporal y recién ahí se guarda; si el llavero falla se vuelve al login común.
+    old=$GHCR
+    GHCR=$usuario:$token
+    auth true || {
+      GHCR=$old
+      echo "$(t 'No pude iniciar sesión en ghcr.io.' 'Could not log in to ghcr.io.')" >&2
+      return 1
+    }
+    # Llavero que no responde: sin llavero por esta vez, sin marcar el aviso.
+    guardar_gh "$GHCR" || { KR=; GHCR=; }
+  fi
+  if [ -z "$KR" ]; then
+    if [ "$SO" = Linux ] && [ -z "$HAYST" ] && [ ! -e "$CRED/.token-sin-cifrar" ]; then
+      echo "$(t 'Sin llavero, docker guarda tu token de GitHub sin cifrar en ~/.docker/config.json. Para evitarlo instalá docker-credential-secretservice.' 'Without a keyring, docker stores your GitHub token unencrypted in ~/.docker/config.json. To avoid it install docker-credential-secretservice.')" >&2
+      : >"$CRED/.token-sin-cifrar"
+    fi
+    printf '%s\n' "$token" | docker login ghcr.io -u "$usuario" --password-stdin >/dev/null || {
+      echo "$(t 'No pude iniciar sesión en ghcr.io.' 'Could not log in to ghcr.io.')" >&2
+      return 1
+    }
+  fi
+  auth docker pull "$IMAGEN" >&2
+}
+
+# 15 s: ghcr.io con el login tarda 3–6 s y con 5 s la búsqueda fallaba seguido.
+# El digest de arriba del manifiesto (el que queda en RepoDigests): buildx lo da aun con un índice multi-plataforma o con atestaciones.
+# shortcut: sin buildx se usa el primer Descriptor de manifest inspect, que solo coincide con una imagen de una sola plataforma.
+remoto() {
+  # {{.Manifest.Digest}} da el de la plataforma con un índice; el JSON trae primero el de arriba.
+  if auth_limite 15 docker buildx imagetools inspect "$IMAGEN" --format '{{json .Manifest}}'; then
+    d=$(tr -d ' \n' <"$TMP/salida" | grep -o '"digest":"sha256:[a-f0-9]*"' | head -n 1 | sed 's/.*"digest":"//; s/"$//')
+    case $d in sha256:*) printf '%s' "$d"; return 0 ;; esac
+  fi
+  auth_limite 15 docker manifest inspect --verbose "$IMAGEN" || return 1
+  tr -d ' \n' <"$TMP/salida" | grep -o '"Descriptor":{[^}]*"digest":"sha256:[a-f0-9]*"' | head -n 1 | sed 's/.*"digest":"//; s/"$//'
+}
+
+migrar
+if ! docker image inspect "$IMAGEN" >/dev/null 2>&1; then
+  traer || exit 1
+elif [ -n "$ACTUALIZAR" ]; then
+  traer || exit 1
+elif case $IMAGEN in *@sha256:*) true ;; *) false ;; esac; then
+  # Imagen fijada por digest (la de un release): no cambia. Lo nuevo llega con un lanzador nuevo; una vez por día,
+  # y sólo con terminal, se avisa si hay un release más nuevo (sin bajar nada).
+  if [ -n "$VERSION_LANZADOR" ] && [ -z "$CYBER_NO_UPDATE" ] && [ -t 0 ] && [ -z "$(find "$CRED/.release-visto" -mtime -1 2>/dev/null)" ]; then
+    : >"$CRED/.release-visto"
+    if limite 8 ultimo_release 6 && version_menor "$VERSION_LANZADOR" "$(cat "$TMP/salida")"; then
+      echo "$(t 'Hay una versión nueva de cyber' 'A new version of cyber is available') ($(cat "$TMP/salida")): cyber --actualizar" >&2
+    fi
+  fi
+elif [ -z "$CYBER_NO_UPDATE" ] && local_=$(docker image inspect -f '{{json .RepoDigests}}' "$IMAGEN" 2>/dev/null) && case $local_ in *sha256:*) true ;; *) false ;; esac; then
+  # Sin digest local (imagen construida a mano) no hay con qué comparar.
+  nuevo=$(remoto)
+  if [ -z "$nuevo" ]; then
+    echo "$(t 'No pude buscar actualizaciones.' 'Could not check for updates.')" >&2
+  elif case $local_ in *"$nuevo"*) false ;; *) true ;; esac; then
+    si "$(t 'Hay una imagen nueva. ¿Actualizo?' 'A new image is available. Update?')" && { traer || exit 1; }
+  fi
+fi
+
+# --actualizar: el lanzador ya se actualizó (o no hacía falta) al principio; acá sólo queda la imagen, que ya bajó.
+[ -z "$ACTUALIZAR" ] || exit 0
+
+# Llave de cifrado: del llavero nativo, creada la primera vez. Sin llavero se avisa una sola vez.
+llave=
+if [ "$SO" = Darwin ]; then
+  if command -v security >/dev/null 2>&1; then
+    llave=$(security find-generic-password -s elevate-cyber -a llave -w 2>/dev/null)
+    if [ -z "$llave" ]; then
+      llave=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+      # Por stdin (security -i) para que la llave no quede en argv; el base64 no tiene comillas ni espacios.
+      printf 'add-generic-password -U -s elevate-cyber -a llave -w %s\n' "$llave" | security -i >/dev/null 2>&1
+      [ "$(security find-generic-password -s elevate-cyber -a llave -w 2>/dev/null)" = "$llave" ] || llave=
+    fi
+  fi
+elif [ -n "$HAYST" ]; then
+  # Con límite: un llavero bloqueado no cuelga el arranque; esa vez se corre sin llave.
+  limite 5 secret-tool lookup service elevate-cyber account llave
+  lk=$?
+  if [ "$lk" = 0 ]; then llave=$(cat "$TMP/salida"); fi
+  # Solo un "no existe" rápido (código 1, sin salida ni error) autoriza a crear una llave: un corte por tiempo o un llavero bloqueado podrían tener la verdadera y no se pisa.
+  if [ -z "$llave" ]; then
+    if [ "$lk" = 1 ] && [ ! -s "$TMP/salida" ] && [ ! -s "$TMP/err" ]; then
+      llave=$(head -c 32 /dev/urandom | base64 | tr -d '\n')
+      guardar_st "$llave" --label=elevate-cyber service elevate-cyber account llave || { llave=; LLAVERO_MAL=1; }
+    else LLAVERO_MAL=1; fi
+  fi
+fi
+if [ -n "$LLAVERO_MAL" ]; then
+  echo "$(t 'El llavero no respondió: esta vez corro sin llave de cifrado (las credenciales no se cifran).' 'The keyring did not answer: this time I run without an encryption key (credentials are not encrypted).')" >&2
+elif [ -z "$llave" ] && [ ! -e "$CRED/.sin-llavero" ]; then
+  echo "$(t 'Sin llavero del sistema: las credenciales se guardan sin cifrar (permiso 0600).' 'No system keyring: credentials are stored unencrypted (mode 0600).')" >&2
+  : >"$CRED/.sin-llavero"
+fi
+
+# Nombre fijo por carpeta: todas las ventanas del mismo proyecto comparten un contenedor (y un daemon).
+nombre_proyecto() {
+  ruta=${1%/}
+  [ -n "$ruta" ] || ruta=/
+  if [ "$SO" = Darwin ]; then h=$(printf %s "$ruta" | shasum -a 256); else h=$(printf %s "$ruta" | sha256sum); fi
+  NOMBRE=cyber-p-$(printf %s "$h" | cut -c1-12)
+}
+
+# ¿Corre el contenedor del proyecto?
+corre() { docker ps --filter "name=^$NOMBRE\$" --format '{{.Names}}' 2>/dev/null | grep -qx "$NOMBRE"; }
+
+# docker run -d del contenedor del proyecto (daemon como proceso principal) con los montajes y el entorno; la llave solo vive en este subproceso.
+# La extensión del navegador entra por 127.0.0.1:P (P de 47615 a 47634) hacia el 47615 del contenedor: se elige el primer P que no publique otro cyber-*,
+# y si el puerto falla (Docker dice «port is already allocated» si ganó otra ventana; «address already in use» y similares si lo tiene otro proceso) se prueba el siguiente.
+# Si el nombre ya existe, otra ventana ganó la carrera y vale como éxito. Con --chequeo corre la imagen sola (sin nombre ni puerto) para ver si el lanzador la entiende.
+# stderr va a un archivo para poder leer esos errores; se muestra si falla.
+crear() (
+  proyecto=$1
+  CYBER_PROYECTO_HOST=$proyecto
+  CYBER_DATOS_HOST=$DATOS
+  CYBER_CREDENCIALES_HOST=$CRED
+  export CYBER_PROYECTO_HOST CYBER_DATOS_HOST CYBER_CREDENCIALES_HOST
+  clave=
+  [ -n "$llave" ] && [ "$2" != --chequeo ] && { CYBER_SECRETS_KEY=$llave; export CYBER_SECRETS_KEY; clave="-e CYBER_SECRETS_KEY"; }
+  usuario=
+  [ "$SO" = Darwin ] || usuario="--user $(id -u):$(id -g)"
+  orobas=
+  [ -n "$OROBAS_API_KEY" ] && [ "$2" != --chequeo ] && orobas="-e OROBAS_API_KEY"
+  # El modo de trazas (compartir, local o no) también vale en el contenedor; si no viene, rige el de config.json.
+  [ -n "$CYBER_TRAZAS" ] && [ "$2" != --chequeo ] && orobas="$orobas -e CYBER_TRAZAS"
+  usados=
+  [ "$2" = --chequeo ] || usados=$(docker ps --filter name=cyber- --format '{{.Ports}}' 2>/dev/null | grep -o ':[0-9]*->47615/tcp' | cut -d: -f2 | cut -d- -f1)
+  p=47615
+  while :; do
+    publicar=
+    if [ "$2" != --chequeo ]; then
+      while [ "$p" -le 47634 ] && printf '%s\n' "$usados" | grep -qx "$p"; do p=$((p + 1)); done
+      if [ "$p" -le 47634 ]; then publicar="-p 127.0.0.1:$p:47615 -e CYBER_PUERTO_HOST=$p"
+      else echo "$(t 'No hay un puerto libre (47615-47634) para la extensión del navegador: en esta ventana no va a andar.' 'No free port (47615-47634) for the browser extension: it will not work in this window.')" >&2; fi
+    fi
+    if [ "$2" = --chequeo ]; then cabeza="--rm -i"; cola=--chequeo; else cabeza="-d --rm --init --name $NOMBRE"; cola=daemon; fi
+    # shellcheck disable=SC2086
+    docker run $cabeza $usuario $publicar --add-host=host.docker.internal:host-gateway \
+      -v "$proyecto:/proyecto" -v "$CRED:/home/node/.config/elevate-cyber" -v "$DATOS:/home/node/.local/share/elevate-cyber" \
+      -e CYBER_PROYECTO_HOST -e CYBER_DATOS_HOST -e CYBER_CREDENCIALES_HOST $clave -e CYBER_COMPARTIDO=1 -e LANG -e LC_ALL \
+      $orobas "$IMAGEN" $cola 2>"$TMP/err-run" >"$TMP/out-run"
+    codigo=$?
+    [ "$2" = --chequeo ] && cat "$TMP/out-run"
+    if [ "$codigo" != 0 ] && [ -z "$2" ] && grep -qE 'container name .* is already in use' "$TMP/err-run"; then exit 0; fi
+    if [ "$codigo" != 0 ] && [ -n "$publicar" ] && grep -qE 'port is already allocated|address already in use|Only one usage|forbidden by its access permissions' "$TMP/err-run"; then
+      corre || docker rm -f "$NOMBRE" >/dev/null 2>&1 # por si quedó creado sin arrancar; si corre es de otra ventana y no se toca
+      p=$((p + 1))
+      continue
+    fi
+    [ ! -s "$TMP/err-run" ] || cat "$TMP/err-run" >&2
+    exit "$codigo"
+  done
+)
+
+# Entra al contenedor del proyecto con una ventana propia (VENTANA: el vigilante la encuentra por esa variable). Con -t Docker no reenvía señales a la terminal.
+entrar() {
+  modo=-i
+  [ -t 0 ] && [ -t 1 ] && modo=-it
+  docker exec $modo -e "CYBER_VENTANA=$VENTANA" -e LANG -e LC_ALL -e TERM -e COLORTERM -e TERM_PROGRAM -e KITTY_WINDOW_ID -e WT_SESSION -e CYBER_STREAMER -e CYBER_STREAMER_HOSTS -e CYBER_STREAMER_PUBLICOS -e CYBER_STREAMER_USO -e CYBER_STREAMER_OBS "$NOMBRE" /opt/elevate-cyber/bin/cyber -C /proyecto "$@"
+}
+
+# Un vigilante aparte de la ventana: cerrar la terminal dejaría la ventana colgada dentro del contenedor.
+nueva_ventana() { VENTANA=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n'); }
+vigilar() {
+  if command -v setsid >/dev/null 2>&1; then lm=setsid; else lm=nohup; fi
+  # Solo recibe pid, contenedor, ventana y ABRI: ni la llave ni la clave de orobas.
+  $lm env -u OROBAS_API_KEY -u CYBER_SECRETS_KEY sh "$0" --vigilar $$ "$NOMBRE" "$VENTANA" "$ABRI" </dev/null >/dev/null 2>&1 &
+  VIG=$!
+}
+
+proyecto=$(pwd)
+chequeo=$(crear "$proyecto" --chequeo 2>&1) || {
+  case $chequeo in
+  *ERR_PARSE_ARGS_UNKNOWN_OPTION* | *nknown\ option*) echo "$(t 'Tu imagen local es vieja para este lanzador: corré cyber --actualizar' 'Your local image is too old for this launcher: run cyber --actualizar')" >&2 ;;
+  *) printf '%s\n' "$chequeo" >&2 ;;
+  esac
+  exit 1
+}
+# Una imagen que entiende --chequeo pero no imprime «compartido» es anterior al modo compartido: se trata igual que una imagen vieja.
+printf '%s\n' "$chequeo" | grep -qx compartido || {
+  echo "$(t 'Tu imagen local es vieja para este lanzador: corré cyber --actualizar' 'Your local image is too old for this launcher: run cyber --actualizar')" >&2
+  exit 1
+}
+rm -f "$DATOS/reabrir.txt" # uno viejo no debe reabrir nada
+
+while :; do
+  # Código 75: el contenedor dejó «ruta<TAB>sesión» en reabrir.txt (--resumen); se reabre ese proyecto y sesión.
+  # No se captura la salida: la TUI tiene que escribir directo a la terminal.
+  nombre_proyecto "$proyecto"
+  nueva_ventana
+  if corre; then
+    ni=$(docker inspect -f '{{.Image}}' "$NOMBRE" 2>/dev/null)
+    li=$(docker image inspect -f '{{.Id}}' "$IMAGEN" 2>/dev/null)
+    [ -z "$ni" ] || [ -z "$li" ] || [ "$ni" = "$li" ] || echo "$(t 'Hay otra ventana de este proyecto con la versión anterior; cerralas para usar la nueva.' 'Another window of this project runs the previous version; close them to use the new one.')" >&2
+  else
+    crear "$proyecto" || exit $?
+    # Si otra ventana ganó la carrera, su contenedor puede estar creado y todavía no corriendo: se espera un poco antes del exec.
+    n=0
+    until corre; do
+      n=$((n + 1))
+      [ $n -gt 15 ] && { echo "$(t 'El contenedor del proyecto no arrancó.' 'The project container did not start.')" >&2; exit 1; }
+      sleep 1
+    done
+  fi
+  vigilar
+  entrar "$@"
+  codigo=$?
+  # Carrera de cierre: la última ventana de otra terminal apagó el contenedor justo antes del exec; se lo recrea una sola vez y se vuelve a entrar.
+  if [ "$codigo" != 0 ] && [ "$codigo" != 75 ] && [ -z "$REINTENTO" ] && ! corre; then
+    REINTENTO=1
+    kill "$VIG" 2>/dev/null
+    continue
+  fi
+  REINTENTO=
+  # En la salida normal el vigilante sigue solo (puede esperar para cerrar Docker); al reabrir se lanza otro.
+  [ "$codigo" = 75 ] || exit "$codigo"
+  kill "$VIG" 2>/dev/null
+  archivo="$DATOS/reabrir.txt"
+  linea=
+  [ -f "$archivo" ] && { IFS= read -r linea <"$archivo"; rm -f "$archivo"; }
+  IFS='	' read -r proyecto sesion <<EOF
+$linea
+EOF
+  if [ -z "$proyecto" ] || [ -z "$sesion" ]; then
+    echo "$(t 'No pude leer qué sesión reabrir (reabrir.txt).' 'Could not read which session to reopen (reabrir.txt).')" >&2
+    exit 75
+  fi
+  [ -d "$proyecto" ] || {
+    echo "$(t 'No existe la carpeta a reabrir:' 'The folder to reopen does not exist:') $proyecto" >&2
+    exit 75
+  }
+  set -- -s "$sesion"
+done

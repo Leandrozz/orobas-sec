@@ -1,0 +1,10 @@
+{
+  "name": "orobas-rea",
+  "version": "1.0.0",
+  "private": true,
+  "description": "REA (rea-agents) fijado para la caja de Orobas",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "rea-agents": "6.8.0"
+  }
+}

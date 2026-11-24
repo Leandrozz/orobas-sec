@@ -1,0 +1,274 @@
+{
+ "name": "atlas-permisos",
+ "synthetic": true,
+ "description": "Tráfico sintético del laboratorio Atlas: 18 rutas × 2 identidades. No proviene de un sistema real.",
+ "identities": [
+  {
+   "id": "comprador",
+   "role": "cliente"
+  },
+  {
+   "id": "operador",
+   "role": "backoffice"
+  }
+ ],
+ "rolePolicy": {
+  "/api/operador": [
+   "operador"
+  ]
+ },
+ "entries": [
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/catalogo",
+   "status": 200,
+   "bytes": 993
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/catalogo",
+   "status": 200,
+   "bytes": 1057
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/catalogo/:id",
+   "status": 200,
+   "bytes": 1141
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/catalogo/:id",
+   "status": 200,
+   "bytes": 1205
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/carrito",
+   "status": 200,
+   "bytes": 956
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/carrito",
+   "status": 200,
+   "bytes": 1020
+  },
+  {
+   "identity": "comprador",
+   "method": "POST",
+   "route": "/api/carrito/items",
+   "status": 200,
+   "bytes": 1178
+  },
+  {
+   "identity": "operador",
+   "method": "POST",
+   "route": "/api/carrito/items",
+   "status": 200,
+   "bytes": 1242
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/pedidos",
+   "status": 200,
+   "bytes": 956
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/pedidos",
+   "status": 200,
+   "bytes": 1020
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/pedidos/:id",
+   "status": 200,
+   "bytes": 1104
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/pedidos/:id",
+   "status": 200,
+   "bytes": 1168
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/pedidos/:id/factura",
+   "status": 200,
+   "bytes": 1400
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/pedidos/:id/factura",
+   "status": 200,
+   "bytes": 1464
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/perfil",
+   "status": 200,
+   "bytes": 919
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/perfil",
+   "status": 200,
+   "bytes": 983
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/perfil/direcciones",
+   "status": 200,
+   "bytes": 1363
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/perfil/direcciones",
+   "status": 200,
+   "bytes": 1427
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/pagos",
+   "status": 200,
+   "bytes": 882
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/pagos",
+   "status": 200,
+   "bytes": 946
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/soporte/tickets",
+   "status": 200,
+   "bytes": 1252
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/soporte/tickets",
+   "status": 200,
+   "bytes": 1316
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/operador/pedidos",
+   "status": 403,
+   "bytes": 48
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/operador/pedidos",
+   "status": 200,
+   "bytes": 1353
+  },
+  {
+   "identity": "comprador",
+   "method": "POST",
+   "route": "/api/operador/pedidos/:id/estado",
+   "status": 403,
+   "bytes": 48
+  },
+  {
+   "identity": "operador",
+   "method": "POST",
+   "route": "/api/operador/pedidos/:id/estado",
+   "status": 200,
+   "bytes": 1760
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/operador/stock",
+   "status": 403,
+   "bytes": 48
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/operador/stock",
+   "status": 200,
+   "bytes": 1279
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/operador/reembolsos",
+   "status": 200,
+   "bytes": 1400
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/operador/reembolsos",
+   "status": 200,
+   "bytes": 1464
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/operador/usuarios",
+   "status": 403,
+   "bytes": 48
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/operador/usuarios",
+   "status": 200,
+   "bytes": 1390
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/operador/reportes",
+   "status": 200,
+   "bytes": 1326
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/operador/reportes",
+   "status": 200,
+   "bytes": 1390
+  },
+  {
+   "identity": "comprador",
+   "method": "GET",
+   "route": "/api/salud",
+   "status": 200,
+   "bytes": 882
+  },
+  {
+   "identity": "operador",
+   "method": "GET",
+   "route": "/api/salud",
+   "status": 200,
+   "bytes": 946
+  }
+ ]
+}

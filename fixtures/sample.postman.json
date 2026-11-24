@@ -1,0 +1,11 @@
+{
+  "info": { "name": "API de ejemplo", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "variable": [{ "key": "base", "value": "https://coleccion.invalid" }, { "key": "token", "value": "token-coleccion" }],
+  "item": [
+    { "name": "Items", "item": [
+      { "name": "Leer", "request": { "method": "GET", "url": { "raw": "{{base}}/api/items/:id?limit=2&disabled=1", "variable": [{ "key": "id", "value": "2" }], "query": [{ "key": "limit", "value": "2" }, { "key": "disabled", "value": "1", "disabled": true }] }, "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }] } },
+      { "name": "Crear", "event": [{ "listen": "prerequest", "script": { "exec": ["throw new Error('no ejecutar');"] } }], "request": { "method": "POST", "url": "{{base}}/api/items", "body": { "mode": "raw", "raw": "{\"title\":\"mate\",\"qty\":2,\"password\":\"clave-ejemplo\",\"nested\":{\"token\":\"{{token}}\"}}" } } }
+    ] },
+    { "name": "Fuera", "request": { "method": "PUT", "url": "https://fuera.invalid/api/items", "body": { "mode": "urlencoded", "urlencoded": [{ "key": "title", "value": "yerba" }, { "key": "token", "value": "{{token}}" }, { "key": "omitido", "value": "x", "disabled": true }] } } }
+  ]
+}

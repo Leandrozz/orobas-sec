@@ -1,0 +1,27 @@
+# Retest a pedido: vuelve a probar los hallazgos verificados de la última corrida guardada en el caché y dice cuáles
+# quedaron arreglados (con la evidencia del control). Sale con 1 si alguno persiste.
+name: Orobas (retest)
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  retest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    environment: staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Leandrozz/orobas-sec@REEMPLAZAR-POR-EL-SHA-DEL-TAG # vX.Y.Z
+        with:
+          version: vX.Y.Z
+          modo: retest
+          autorizacion: ${{ vars.OROBAS_ALCANCE_AUTORIZADO }}
+          comentar: "false"
+        env:
+          OROBAS_API_KEY: ${{ secrets.OROBAS_API_KEY }}
+          STAGING_TOKEN_ALICIA: ${{ secrets.STAGING_TOKEN_ALICIA }}

@@ -1,0 +1,156 @@
+# GitHub Action de Orobas (orobas-sec): evaluación de seguridad no interactiva contra tu staging o el entorno del PR.
+# Sólo los hallazgos verificados por el verificador independiente hacen fallar el job. Guía y ejemplos: docs/ci.md.
+#
+# Usala fijada por SHA (uses: Leandrozz/orobas-sec@<sha> # vX.Y.Z): el install.sh de la acción trae la clave pública
+# de los releases y verifica la firma de la versión que pidas en «version».
+name: Orobas en CI
+description: Evaluación de seguridad de Orobas contra tu staging o el entorno del PR, con alcance autorizado, topes duros y sólo hallazgos verificados.
+author: Elevate AI
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  version:
+    description: Versión FIJA del agente (vX.Y.Z) de un release firmado. No acepta latest ni ramas.
+    required: true
+  autorizacion:
+    description: La huella del alcance autorizado («cyber ci huella»). Ponela en una variable del repositorio o de un environment protegido (vars.OROBAS_ALCANCE_AUTORIZADO), nunca en el archivo.
+    required: true
+  config:
+    description: Archivo de configuración.
+    required: false
+    default: .orobas/ci.yml
+  modo:
+    description: evaluar (por defecto) o retest (vuelve a probar los hallazgos verificados de la corrida anterior).
+    required: false
+    default: evaluar
+  forks:
+    description: PRs de forks. omitir (por defecto) no corre; base corre con la configuración y las supresiones de la rama base (sólo tiene sentido con pull_request_target; leé docs/ci.md antes).
+    required: false
+    default: omitir
+  comentar:
+    description: Crear o editar el comentario del PR (necesita pull-requests write).
+    required: false
+    default: "true"
+  subir-sarif:
+    description: Subir el SARIF a la pestaña de seguridad (necesita security-events write).
+    required: false
+    default: "true"
+  cache:
+    description: Guardar el resultado para comparar con la próxima corrida (sólo el resultado tapado, nunca los datos crudos).
+    required: false
+    default: "true"
+  salida:
+    description: Carpeta de las salidas (resultado.json, resultado.sarif, resumen.md, registro.jsonl).
+    required: false
+    default: orobas-ci
+  argumentos:
+    description: Opciones extra de «cyber ci» (por ejemplo «--solo-lectura --junit»).
+    required: false
+    default: ""
+  node-version:
+    description: Versión de Node para el agente (22.19 o más nueva).
+    required: false
+    default: "24"
+  github-token:
+    description: Token para comentar y subir el SARIF.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  codigo:
+    description: Código de salida (0 ok, 1 hallazgos que bloquean, 2 configuración, 3 proveedor o infraestructura, 4 presupuesto o tiempo agotado).
+    value: ${{ steps.correr.outputs.codigo }}
+  sarif:
+    description: Ruta del SARIF.
+    value: ${{ steps.correr.outputs.sarif }}
+  resumen:
+    description: Ruta del resumen en Markdown.
+    value: ${{ steps.correr.outputs.resumen }}
+  corrio:
+    description: si, o no (PR de un fork con forks omitir).
+    value: ${{ steps.preparar.outputs.correr }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - id: preparar
+      name: Preparar (versión, forks, caché)
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_MODO: ${{ inputs.modo }}
+        INPUT_FORKS: ${{ inputs.forks }}
+        INPUT_CONFIG: ${{ inputs.config }}
+      run: bash "$GITHUB_ACTION_PATH/distro/ci/accion.sh" preparar
+
+    - name: Restaurar la corrida anterior
+      if: steps.preparar.outputs.correr == 'si' && inputs.cache == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .orobas-ci-cache
+        key: ${{ steps.preparar.outputs.clave }}
+        restore-keys: ${{ steps.preparar.outputs.claves }}
+
+    - name: Instalar Orobas (release firmado y verificado)
+      if: steps.preparar.outputs.correr == 'si'
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: bash "$GITHUB_ACTION_PATH/distro/ci/accion.sh" instalar
+
+    - id: correr
+      name: Evaluar
+      if: steps.preparar.outputs.correr == 'si'
+      shell: bash
+      env:
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_CONFIG_REF: ${{ steps.preparar.outputs.config_ref }}
+        INPUT_MODO: ${{ inputs.modo }}
+        INPUT_SALIDA: ${{ inputs.salida }}
+        INPUT_ARGUMENTOS: ${{ inputs.argumentos }}
+        OROBAS_CI_AUTORIZACION: ${{ inputs.autorizacion }}
+      run: bash "$GITHUB_ACTION_PATH/distro/ci/accion.sh" correr
+
+    - name: Guardar las salidas y el registro como artefacto
+      if: always() && steps.preparar.outputs.correr == 'si'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: orobas-ci-${{ github.job }}-${{ github.run_attempt }}
+        path: ${{ inputs.salida }}
+        if-no-files-found: warn
+        retention-days: 30
+
+    - name: Subir el SARIF a la pestaña de seguridad
+      if: always() && steps.correr.outputs.sarif != '' && inputs.subir-sarif == 'true' && steps.preparar.outputs.fork != 'si'
+      uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      with:
+        sarif_file: ${{ steps.correr.outputs.sarif }}
+        token: ${{ inputs.github-token }}
+
+    - name: Comentar en el PR
+      if: always() && steps.correr.outputs.resumen != '' && inputs.comentar == 'true' && github.event.pull_request.number && steps.preparar.outputs.fork != 'si'
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_SALIDA: ${{ inputs.salida }}
+      run: bash "$GITHUB_ACTION_PATH/distro/ci/accion.sh" comentar
+
+    - name: Guardar la corrida para la próxima
+      if: always() && steps.correr.outputs.guardar_cache == 'si' && inputs.cache == 'true' && steps.preparar.outputs.fork != 'si'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .orobas-ci-cache
+        key: ${{ steps.preparar.outputs.clave }}
+
+    - name: Resultado
+      if: always()
+      shell: bash
+      env:
+        INPUT_CORRIO: ${{ steps.preparar.outputs.correr }}
+      run: bash "$GITHUB_ACTION_PATH/distro/ci/accion.sh" terminar

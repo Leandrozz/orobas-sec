@@ -1,0 +1,8 @@
+{
+  "name": "Entorno local",
+  "values": [
+    { "key": "base", "value": "http://127.0.0.1:1", "enabled": true },
+    { "key": "token", "value": "token-entorno-privado", "type": "secret", "enabled": true },
+    { "key": "base", "value": "https://deshabilitado.invalid", "enabled": false }
+  ]
+}

@@ -1,0 +1,64 @@
+# Orobas en GitLab CI: copiá este trabajo a tu .gitlab-ci.yml (o a un archivo que incluyas). Guía: docs/ci.md.
+#
+# Variables que define quien administra el proyecto (Settings → CI/CD → Variables, enmascaradas y protegidas):
+#   OROBAS_API_KEY            la clave de la cuenta (o la del proveedor que uses: ANTHROPIC_API_KEY, OPENAI_API_KEY…)
+#   OROBAS_CI_AUTORIZACION    la huella del alcance de .orobas/ci.yml («cyber ci huella»): sin ella no corre
+#   las de las identidades de prueba que nombra .orobas/ci.yml
+#   OROBAS_CI_GITLAB_TOKEN    opcional: token de proyecto con permiso api, para comentar en el MR
+# Las variables protegidas sólo llegan a ramas y tags protegidos: un MR desde un fork no las ve (y acá no corre).
+variables:
+  # Versión FIJA del agente y la clave pública de los releases (docs/releases.md): la verificación arranca acá.
+  OROBAS_VERSION: "vX.Y.Z"
+  OROBAS_CLAVE_PUBLICA: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFfKpWK3+u7xt/H1nXdYudXF4DWUorU16LWu7ACfcP+R"
+
+orobas:
+  stage: test
+  # La misma base que la imagen del proyecto, fijada por digest.
+  image: node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
+  rules:
+    # Un MR desde un fork no corre con las credenciales del proyecto.
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_SOURCE_PROJECT_ID != $CI_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  variables:
+    GIT_DEPTH: "0"
+  cache:
+    key: orobas-ci-$CI_COMMIT_REF_SLUG
+    fallback_keys:
+      - orobas-ci-$CI_DEFAULT_BRANCH
+    paths:
+      - .orobas-ci-cache/
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends ca-certificates curl git openssh-client >/dev/null
+    - |
+      # Instalar la versión fija, verificada por firma (lo mismo que distro/ci/instalar-verificado.sh).
+      set -eu
+      printf '%s\n' "$OROBAS_VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "OROBAS_VERSION tiene que ser una versión fija vX.Y.Z"; exit 2; }
+      T=$(mktemp -d); U="${CYBER_RELEASES_URL:-https://github.com/Leandrozz/orobas-sec/releases}/download/$OROBAS_VERSION"
+      P='=https'; case $U in http://127.0.0.1:*) P='=http,https' ;; esac
+      for f in SHA256SUMS SHA256SUMS.sig install.sh; do curl -fsSL --proto "$P" -o "$T/$f" "$U/$f"; done
+      printf 'orobas-sec namespaces="orobas-sec-release" %s\n' "$OROBAS_CLAVE_PUBLICA" > "$T/firmantes"
+      ssh-keygen -Y verify -f "$T/firmantes" -I orobas-sec -n orobas-sec-release -s "$T/SHA256SUMS.sig" < "$T/SHA256SUMS"
+      grep -qx "$(sha256sum "$T/install.sh" | cut -d' ' -f1)  install.sh" "$T/SHA256SUMS"
+      sh "$T/install.sh" --version "$OROBAS_VERSION" --modo nativo --prefix "$HOME/orobas-sec" --bin "$HOME/orobas-sec/bin" --si
+      export PATH="$HOME/orobas-sec/bin:$PATH"
+  script:
+    - |
+      set +e
+      ANTERIOR=""; [ -f .orobas-ci-cache/anterior.json ] && ANTERIOR="--anterior .orobas-ci-cache/anterior.json"
+      cyber ci --salida orobas-ci --junit $ANTERIOR
+      CODIGO=$?
+      set -e
+      case $CODIGO in 0|1|4) mkdir -p .orobas-ci-cache && cp orobas-ci/resultado.json .orobas-ci-cache/anterior.json ;; esac
+      if [ -n "${CI_MERGE_REQUEST_IID:-}" ] && [ -n "${OROBAS_CI_GITLAB_TOKEN:-}" ]; then cyber ci comentar --salida orobas-ci || echo "No pude comentar en el MR."; fi
+      exit $CODIGO
+  artifacts:
+    when: always
+    expire_in: 30 days
+    paths:
+      - orobas-ci/
+    reports:
+      # GitLab Ultimate muestra el JUnit en el MR; el SARIF queda en los artefactos.
+      junit: orobas-ci/junit.xml

@@ -1,0 +1,6 @@
+# Los scripts que corren en Linux (incluido el contenedor) no pueden tener \r; los de Windows (.ps1, .cmd) se guardan tal cual (-text), con su BOM y sus fines de línea.
+bin/cyber text eol=lf
+distro/lanzador/cyber text eol=lf
+*.sh text eol=lf
+*.ps1 -text
+*.cmd -text

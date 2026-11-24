@@ -1,0 +1,2 @@
+// Formatos de tokens reconocibles aunque aparezcan bajo una cabecera de identificación pública.
+export const tokenConPrefijo = /\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{30,}|glpat-[A-Za-z0-9_-]{16,}|xox[abprs]-[A-Za-z0-9-]{10,}|[sr]k_(?:live|test)_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|ya29\.[A-Za-z0-9_-]{20,}|sbp_[a-f0-9]{30,}|sb_secret_[A-Za-z0-9_-]{16,}|shpat_[A-Za-z0-9]{16,}|dp\.(?:pt|st|ct|sa|scim)\.[A-Za-z0-9._~+/=-]{16,}|ATATT[A-Za-z0-9._~+/=-]{16,}|bb_[A-Za-z0-9_-]{16,}|oro_[A-Za-z0-9]{16,})/g;

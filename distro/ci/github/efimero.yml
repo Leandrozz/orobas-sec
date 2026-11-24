@@ -1,0 +1,56 @@
+# Orobas contra el entorno efímero de cada PR (una vista previa que levanta otro trabajo). La URL llega por una
+# variable y el alcance la acepta sólo si cumple el patrón «permitido» de .orobas/ci.yml, por ejemplo:
+#
+#   objetivo:
+#     alcance:
+#       - url: ${PREVIEW_URL}
+#         nombre: preview
+#         permitido: ["https://pr-*.preview.ejemplo.com"]
+#
+# Así la huella del alcance es la misma en todos los PRs y la variable no puede apuntar a cualquier lado.
+name: Orobas (vista previa del PR)
+on:
+  pull_request:
+permissions: {}
+concurrency:
+  group: orobas-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    outputs:
+      url: ${{ steps.vista.outputs.url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Tu despliegue de la vista previa: tiene que dejar la URL en la salida «url».
+      - id: vista
+        run: echo "url=https://pr-${PR}.preview.ejemplo.com" >> "$GITHUB_OUTPUT"
+        env:
+          PR: ${{ github.event.pull_request.number }}
+  seguridad:
+    needs: desplegar
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: Leandrozz/orobas-sec@REEMPLAZAR-POR-EL-SHA-DEL-TAG # vX.Y.Z
+        with:
+          version: vX.Y.Z
+          autorizacion: ${{ vars.OROBAS_ALCANCE_AUTORIZADO }}
+          argumentos: --solo-cambios si
+        env:
+          PREVIEW_URL: ${{ needs.desplegar.outputs.url }}
+          OROBAS_API_KEY: ${{ secrets.OROBAS_API_KEY }}
+          PREVIEW_TOKEN_ALICIA: ${{ secrets.PREVIEW_TOKEN_ALICIA }}

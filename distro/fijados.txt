@@ -1,0 +1,49 @@
+# Lo que la imagen (distro/Dockerfile) baja de sus autores: versión exacta y SHA-256 de cada archivo. Durante el
+# build, distro/bajar-fijado.sh baja cada uno y frena si la suma no coincide. scripts/actualizar-fijados.sh propone
+# versiones nuevas (baja, calcula y contrasta con las sumas del autor) y reescribe este archivo: revisá el diff.
+# Formato y opciones: scripts/fijados.ts. Python (semgrep) va aparte, en distro/semgrep-requisitos.txt.
+
+# Escáneres de ProjectDiscovery y ffuf: zip o tar.gz con el binario, y la lista de sumas de cada release.
+@ httpx origen=github:projectdiscovery/httpx sumas=lista:https://github.com/projectdiscovery/httpx/releases/download/v{v}/httpx_{v}_checksums.txt,github
+httpx 1.12.0 amd64 9d8439e8b6c9aa7d1e2314817a392e00d5178da3af5652f7475f88868f418f76 https://github.com/projectdiscovery/httpx/releases/download/v1.12.0/httpx_1.12.0_linux_amd64.zip
+httpx 1.12.0 arm64 fd7b123c1dfbc3d69f19f524e4eebcd6ec06b9a6cbd56813c76f11645197331e https://github.com/projectdiscovery/httpx/releases/download/v1.12.0/httpx_1.12.0_linux_arm64.zip
+@ nuclei origen=github:projectdiscovery/nuclei sumas=lista:https://github.com/projectdiscovery/nuclei/releases/download/v{v}/nuclei_{v}_checksums.txt,github
+nuclei 3.11.1 amd64 ea63d4ae232808cd7c6bc00d0142428e231fab59dae01042246097d195835ab6 https://github.com/projectdiscovery/nuclei/releases/download/v3.11.1/nuclei_3.11.1_linux_amd64.zip
+nuclei 3.11.1 arm64 8044e3d9768ba0a744b2872c1a87e813006f013da97ca9f50f7661a4203bec07 https://github.com/projectdiscovery/nuclei/releases/download/v3.11.1/nuclei_3.11.1_linux_arm64.zip
+@ subfinder origen=github:projectdiscovery/subfinder sumas=lista:https://github.com/projectdiscovery/subfinder/releases/download/v{v}/subfinder_{v}_checksums.txt,github
+subfinder 2.17.0 amd64 a39c3e5c7a26ef3c430915c4d6cbf7716a00f26769a75e9405aba796142eba37 https://github.com/projectdiscovery/subfinder/releases/download/v2.17.0/subfinder_2.17.0_linux_amd64.zip
+subfinder 2.17.0 arm64 24913d49dddc1d3a5e99a4a7580da5be980959b9415b96f52c4f7f4124392190 https://github.com/projectdiscovery/subfinder/releases/download/v2.17.0/subfinder_2.17.0_linux_arm64.zip
+@ katana origen=github:projectdiscovery/katana sumas=lista:https://github.com/projectdiscovery/katana/releases/download/v{v}/katana-{v}-checksums.txt,github
+katana 1.8.0 amd64 cb027ae99d0757061b70c07a15c7a80f62c5a535ab52c4a329f80c4b0a7309d2 https://github.com/projectdiscovery/katana/releases/download/v1.8.0/katana_1.8.0_linux_amd64.zip
+katana 1.8.0 arm64 80e269210727a855511ffac8dfb01297b2344742acec71a35e8ba4a67a90f0f2 https://github.com/projectdiscovery/katana/releases/download/v1.8.0/katana_1.8.0_linux_arm64.zip
+@ dnsx origen=github:projectdiscovery/dnsx sumas=lista:https://github.com/projectdiscovery/dnsx/releases/download/v{v}/dnsx_{v}_checksums.txt,github
+dnsx 1.3.1 amd64 438b964653056dd51dcfe614b1a16f8bced3cc48a1d27bc07cc6fdf2ef2a9533 https://github.com/projectdiscovery/dnsx/releases/download/v1.3.1/dnsx_1.3.1_linux_amd64.zip
+dnsx 1.3.1 arm64 dd657dd1ccee5e137eca2dbad0e97dbd067555f744adb97efcda774f1b2fbde1 https://github.com/projectdiscovery/dnsx/releases/download/v1.3.1/dnsx_1.3.1_linux_arm64.zip
+@ ffuf origen=github:ffuf/ffuf sumas=lista:https://github.com/ffuf/ffuf/releases/download/v{v}/ffuf_{v}_checksums.txt,github
+ffuf 2.3.0 amd64 b2a3c725fcb9da175159682f54d6e9149f2905b00d84d155e7efc5d599975ceb https://github.com/ffuf/ffuf/releases/download/v2.3.0/ffuf_2.3.0_linux_amd64.tar.gz
+ffuf 2.3.0 arm64 e2d712615d53da797ee929006e41f2df5a7960a5353133db9c150ddaa22ae4e8 https://github.com/ffuf/ffuf/releases/download/v2.3.0/ffuf_2.3.0_linux_arm64.tar.gz
+
+# Análisis estático.
+@ gitleaks origen=github:gitleaks/gitleaks sumas=lista:https://github.com/gitleaks/gitleaks/releases/download/v{v}/gitleaks_{v}_checksums.txt,github
+gitleaks 8.30.1 amd64 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+gitleaks 8.30.1 arm64 e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz
+
+# CLIs de plataformas (platform_cli).
+@ gh origen=github:cli/cli sumas=lista:https://github.com/cli/cli/releases/download/v{v}/gh_{v}_checksums.txt,github
+gh 2.104.0 amd64 98cb101ad87dbbd3f6b2f2bfcbd43197ccd07643140121d8a9cfaa91eadbc24e https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_linux_amd64.tar.gz
+gh 2.104.0 arm64 cb34cefc6f4e77b90731374a2b737516bb8f3033c6ca46aa949e5344f68069e3 https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_linux_arm64.tar.gz
+@ supabase origen=github:supabase/cli sumas=lista:https://github.com/supabase/cli/releases/download/v{v}/checksums.txt,github
+supabase 3.1.0 amd64 dbe9fd66771337fc198727da86b9d3551302f87a7091cd8781be2a4cd0c8ac4d https://github.com/supabase/cli/releases/download/v3.1.0/supabase_3.1.0_linux_amd64.tar.gz
+supabase 3.1.0 arm64 e49b2ab2f4fb428f4e033174d6d9747dd93c95d1504142ba5090699b1ecd2563 https://github.com/supabase/cli/releases/download/v3.1.0/supabase_3.1.0_linux_arm64.tar.gz
+@ kubectl origen=url:https://dl.k8s.io/release/stable.txt sumas=sha256:{url}.sha256
+kubectl 1.37.2 amd64 c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4 https://dl.k8s.io/release/v1.37.2/bin/linux/amd64/kubectl
+kubectl 1.37.2 arm64 fcc16f63186659d9722014b7e02d5fdd2d4e669cb8c0ab66365d7d3b8ba03509 https://dl.k8s.io/release/v1.37.2/bin/linux/arm64/kubectl
+@ awscli origen=github-tags:aws/aws-cli:2. sumas=gpg:{url}.sig
+awscli 2.40.3 amd64 4770c06c4ecfc8ba94b60d89e6c7018ab7ea2cf5341b1ef05f6f93c5d6e8b705 https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.40.3.zip
+awscli 2.40.3 arm64 4c5f080c6c294eb0da77734c4520f5b5089cf45a4ee757ca34ddf7f9e512e66a https://awscli.amazonaws.com/awscli-exe-linux-aarch64-2.40.3.zip
+
+# Apps móviles (apk_analyze): Java, igual en las dos arquitecturas. Mismas versiones que src/instalar-herramientas.ts.
+@ jadx origen=github:skylot/jadx sumas=github
+jadx 1.5.6 all 545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974 https://github.com/skylot/jadx/releases/download/v1.5.6/jadx-1.5.6.zip
+@ apktool origen=github:iBotPeaches/Apktool sumas=github
+apktool 3.0.3 all dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423 https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar

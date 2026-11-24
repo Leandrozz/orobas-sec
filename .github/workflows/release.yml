@@ -1,0 +1,95 @@
+# Release del repositorio público: al empujar un tag vX.Y.Z (de un commit de main) arma los archivos con
+# scripts/release/armar.sh, firma SHA256SUMS con la clave del entorno «release» y crea el release EN BORRADOR.
+# Lo publica una persona después de revisarlo. Sólo runners de GitHub; cada trabajo con los permisos mínimos;
+# acciones fijadas por SHA de commit. Qué hay que configurar una vez: docs/releases.md.
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+permissions: {}
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  armar:
+    # Arma sin ver la clave ni poder escribir en el repositorio.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
+      - name: El tag es vX.Y.Z y apunta a un commit de main
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Armar
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/release/armar.sh "$TAG" dist --repo "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
+
+  firmar:
+    # Sólo este trabajo ve la clave privada: es un secreto del entorno «release», que pide aprobación manual.
+    needs: armar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+      - name: Firmar SHA256SUMS
+        env:
+          CLAVE: ${{ secrets.OROBAS_FIRMA_RELEASE }}
+        run: |
+          set -eu
+          [ -n "$CLAVE" ] || { echo '::error::Falta el secreto OROBAS_FIRMA_RELEASE en el entorno release (docs/releases.md).'; exit 1; }
+          umask 077
+          d=$(mktemp -d)
+          trap 'rm -rf "$d"' EXIT
+          printf '%s\n' "$CLAVE" >"$d/clave"
+          ssh-keygen -q -Y sign -n orobas-sec-release -f "$d/clave" dist/SHA256SUMS
+      - name: Verificar como un usuario, con la clave que trae install.sh
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          clave=$(sed -n "s/^CLAVE_PUBLICA='\(.*\)'\$/\1/p" dist/install.sh)
+          case $clave in '' | *REEMPLAZAR*) echo '::error::install.sh no trae la clave pública real (scripts/release/fijar-clave.sh).'; exit 1 ;; esac
+          printf 'orobas-sec namespaces="orobas-sec-release" %s\n' "$clave" >"$RUNNER_TEMP/firmantes"
+          ssh-keygen -Y verify -f "$RUNNER_TEMP/firmantes" -I orobas-sec -n orobas-sec-release -s dist/SHA256SUMS.sig <dist/SHA256SUMS
+          grep -q "  orobas-sec-$TAG.tar.gz\$" dist/SHA256SUMS
+          (cd dist && sha256sum -c SHA256SUMS)
+          printf '%s\n' "$clave" >"$RUNNER_TEMP/clave.pub"
+          echo "HUELLA=$(ssh-keygen -lf "$RUNNER_TEMP/clave.pub" | cut -d' ' -f2)" >>"$GITHUB_ENV"
+      - name: Crear el release en borrador
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          {
+            echo "Instalar (Linux y macOS): \`curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sh\`"
+            echo
+            echo "Antes de ejecutar, verificá la firma de \`SHA256SUMS\` con la clave de los releases (huella \`$HUELLA\`) y la suma de lo que bajes: README, «Verificá antes de ejecutar»."
+            grep -q 'cyber-lanzador' dist/SHA256SUMS || { echo; echo 'Este release no trae modo contenedor (no fija una imagen).'; }
+          } >"$RUNNER_TEMP/notas.md"
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Orobas $TAG" --notes-file "$RUNNER_TEMP/notas.md"

@@ -1,0 +1,11 @@
+Elevate AI Cyber (Orobas)
+Copyright 2026 Elevate AI
+
+Este producto incluye software desarrollado por Elevate AI y se distribuye bajo
+la licencia Apache, versión 2.0 (ver LICENSE).
+
+Los componentes de terceros que se instalan como dependencias (npm, la imagen de
+Docker y las herramientas que baja) conservan sus propias licencias y avisos.
+
+test/fixtures/sarif-schema-2.1.0.json es el esquema JSON de SARIF 2.1.0 de OASIS (Copyright (c) OASIS Open),
+copiado sin cambios de docs.oasis-open.org para validar en las pruebas las salidas de «cyber ci».

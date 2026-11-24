@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Orobas · navegador del operador",
+  "version": "0.4.0",
+  "description": "Conecta este navegador con el agente orobas-sec que corre en esta máquina. Sólo actúa sobre pestañas de sitios dentro del alcance autorizado.",
+  "permissions": ["tabs", "scripting", "cookies", "webRequest", "storage", "alarms"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Orobas", "default_popup": "popup.html" }
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 300px; margin: 12px; color: #1c1917; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; font: 12px ui-monospace, monospace; }
+  button { margin-top: 8px; padding: 6px 10px; }
+  p { margin: 8px 0; line-height: 1.35; }
+  #status { font-weight: 600; }
+  small { color: #57534e; }
+</style>
+<h1>Orobas · este navegador</h1>
+<p>Estado: <span id="status">…</span></p>
+<p><small id="hint"></small></p>
+<label>Código de emparejamiento<input id="token" type="password" placeholder="lo muestra «cyber extension»"></label>
+<button id="save">Conectar</button>
+<button id="pause"></button>
+<p><small>Se conecta a los agentes de esta máquina (y de sus contenedores), todos con el mismo código, y sólo actúa en pestañas de sitios dentro del alcance. Una pestaña en uso muestra «ON» en el ícono. No completa contraseñas ni hace clic en borrar, pagar o transferir.</small></p>
+<script src="popup.js"></script>

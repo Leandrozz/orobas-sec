@@ -1,0 +1,26 @@
+{
+  "name": "elevate-ai-cyber",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Orobas: agente de pentest y bug bounty para la terminal, de Elevate AI",
+  "scripts": {
+    "start": "bin/cyber",
+    "test": "node --disable-warning=ExperimentalWarning --import ./test/datos-tmp.ts --test test/",
+    "typecheck": "tsc -p ."
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@toon-format/toon": "4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2"
+  },
+  "bin": {
+    "cyber": "bin/cyber"
+  }
+}

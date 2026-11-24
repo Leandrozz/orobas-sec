@@ -1,0 +1,18 @@
+{
+  "defaultModel": "orobas/glm-5.3-flash",
+  "strongModel": "orobas/cyber-ultra-1.0",
+  "providers": {
+    "orobas": {
+      "baseUrl": "https://cyber.elevateai.ar/api/v1",
+      "apiKeyEnv": "OROBAS_API_KEY",
+      "models": {
+        "deepseek-v4.1-flash-estandar": {
+          "contextWindow": 1048576
+        },
+        "deepseek-v4.1-flash": {
+          "contextWindow": 1048576
+        }
+      }
+    }
+  }
+}
