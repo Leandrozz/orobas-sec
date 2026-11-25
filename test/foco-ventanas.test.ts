@@ -650,3 +650,46 @@ test("ventanas: al salir se rechazan los permisos pendientes de todas las sesion
     assert.equal(p.otro.status.running, false); // el turno no quedó esperando el permiso
   } finally { p?.otro.close(); t.daemon.close(); }
 });
+
+test("chat personal: el editor despacha comandos de Orobas y sólo envía texto al proveedor", async () => {
+  const { writeSecret } = await import("../src/secretos.ts");
+  const { mock } = await import("node:test");
+  const previous = process.env.CYBER_CREDENTIALS_DIR;
+  process.env.CYBER_CREDENTIALS_DIR = mkdtempSync(join(tmpdir(), "personal-foco-"));
+  const requests: string[] = [];
+  const fetchMock = mock.method(globalThis, "fetch", async (_url: unknown, options: { body?: string }) => {
+    if (!options.body) return Response.json({ data: [] });
+    requests.push(JSON.parse(options.body).messages.at(-1).content);
+    return Response.json({ choices: [{ message: { content: "respuesta personal de prueba" } }], usage: { total_tokens: 17, prompt_tokens: 12 } });
+  });
+  const t = await armar();
+  try {
+    writeSecret("chat-personal-" + "a".repeat(64), JSON.stringify({ provider: "Self-hosted", model: "modelo-prueba", base: "https://example.invalid/v1" }));
+    t.foco.submit("/modelos");
+    await until(() => t.visible().includes("Modelo Prueba"));
+    t.state.input("self-hosted");
+    assert.match(t.visible(), /Modelo Prueba/);
+    assert.doesNotMatch(t.visible(), /Conectar modelo o escribir proveedor/i);
+    t.state.input("\r");
+    await until(() => t.visible().includes("chat personal"));
+    t.foco.submit("/ayuda");
+    await tick();
+    t.foco.submit("hola desde el editor");
+    await until(() => t.visible().includes("respuesta personal de prueba"));
+    assert.deepEqual(requests, ["hola desde el editor"]);
+    assert.match(t.visible(), /respuesta personal de prueba/);
+    const { projectPaths, openStore } = await import("../src/store.ts");
+    const db = openStore(projectPaths(t.cwd));
+    try {
+      const rows = db.prepare("select type,payload from events where session_id=? and type like 'personal.%' order by seq").all(t.client.status.session!);
+      assert.deepEqual(rows.map(row => row.type), ["personal.start", "personal.finish"]);
+      assert.equal(JSON.parse(String(rows[1]!.payload)).tokens, 17);
+    } finally { db.close(); }
+  } finally {
+    fetchMock.mock.restore();
+    if (previous === undefined) delete process.env.CYBER_CREDENTIALS_DIR;
+    else process.env.CYBER_CREDENTIALS_DIR = previous;
+    t.foco.exit();
+    t.daemon.close();
+  }
+});

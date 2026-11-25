@@ -40,6 +40,7 @@ export class Registro {
     return entrada;
   }
 
+  respuestaPersonal(markdown: string): Entrada { return this.nueva<Texto>({ tipo: "texto", markdown, completo: true, en: this.ahora() }); }
   mensaje(texto: string): Entrada { return this.nueva<Extract<Entrada, { tipo: "mensajes" }>>({ tipo: "mensajes", texto, en: this.ahora() }); }
   panel(panel: Panel): Entrada { return this.nueva<Extract<Entrada, { tipo: "comandos" }>>({ tipo: "comandos", panel }); }
   aviso(texto: string, tono: Tono): Entrada { return this.nueva<Extract<Entrada, { tipo: "avisos" }>>({ tipo: "avisos", texto, tono }); }

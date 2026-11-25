@@ -1,7 +1,10 @@
+import { BRANDS, modelName } from "./nombres-modelos.ts";
+export { modelName } from "./nombres-modelos.ts";
 // Comandos del operador en la TUI: un registro declarativo en vez de una cadena de if.
 // Cada comando decide cómo se presenta: un panel con título y pie, un menú con flechas cuando hay
 // opciones, una entrada cuando hace falta un valor, y confirmación cuando el paso no se deshace.
 // La ejecución real vive en el daemon (ask/view); acá sólo está la interacción con la persona.
+import { personalRow, selectablePersonal, connectPersonal, type Connection } from "./modelos-personales.ts";
 import { lineasDe, NOVEDADES } from "./novedades.ts";
 import { t } from "../idioma.ts";
 import { TEMAS, buscarTema, temaActivo, usarTema, type Tema } from "./temas.ts";
@@ -38,6 +41,10 @@ export type CycleResult = Row | { rows: Array<string | Row>; at: number } | unde
 
 /** Lo que un comando puede hacer con la interfaz. La TUI y la terminal común lo implementan. */
 export interface CommandIO {
+  selectPersonal?(connection?: Connection): void;
+  openClaudeModel?(model: string): void;
+  personalActive?(): Connection | undefined;
+  loginCLI?(client: "codex" | "claude" | "kimi" | "agy"): Promise<boolean>;
   ask(op: string, payload?: object): Promise<string[]>;
   view(name: string, arg?: string): Promise<string[]>;
   /**
@@ -177,6 +184,13 @@ const REASONING_LEVELS: Record<string, () => Option> = {
  * modelo: …» de la respuesta del daemon), el menú son esos niveles; si no, prendido, apagado o por defecto.
  */
 const reasoningOptions = (current = ""): Option[] => {
+  const personal = /^Opciones personales: *(.*)$/m.exec(current);
+  if (personal) {
+    return ["default", ...personal[1]!.split(",").filter(Boolean)].map(value => ({
+      label: ({ default: t("por defecto", "default"), on: t("activado", "on"), off: t("apagado", "off") } as Record<string, string>)[value] ?? value,
+      value, hint: "", match: new RegExp("^Razonamiento: " + value + " ·"),
+    }));
+  }
   const off: Option = { label: "no", value: "no", hint: t("más rápido y barato", "faster and cheaper"), match: /apagado|desactivado|\boff\b/i };
   const auto: Option = { label: t("por defecto", "default"), value: "defecto", hint: t("lo que el modelo haga por su cuenta", "whatever the model does by default"), match: /defecto|default/i };
   const levels = /Niveles de este modelo: ([^;.\n]*)/.exec(current)?.[1];
@@ -440,20 +454,6 @@ export function parseModels(lines: string[]): { current: string; models: ModelRo
   }
   return { current, models, others };
 }
-const BRANDS: Record<string, string> = { deepseek: "DeepSeek", glm: "GLM", qwen: "Qwen", gpt: "GPT", claude: "Claude", gemini: "Gemini", llama: "Llama", mistral: "Mistral", kimi: "Kimi", grok: "Grok", estandar: "Estándar" };
-/** Nombre legible a partir del id del modelo: «deepseek-v4.1-flash» → «DeepSeek V4.1 Flash», «qwen3.8-27b» → «Qwen3.8 27B». */
-export function modelName(spec: string): string {
-  const words = spec.slice(spec.indexOf("/") + 1).split(/[-_\s]+/).filter(Boolean).map((word) => {
-    if (word === "faux") return t("Simulado", "Simulated");
-    const brand = /^([a-z]+)(\d.*)?$/i.exec(word);
-    if (brand && BRANDS[brand[1]!.toLowerCase()]) return BRANDS[brand[1]!.toLowerCase()] + (brand[2] ?? "");
-    if (/^\d[\d.]*b$/i.test(word) || /^v\d/i.test(word)) return word.toUpperCase();
-    if (/^\d/.test(word)) return word;
-    return word.charAt(0).toUpperCase() + word.slice(1);
-  });
-  // Versiones partidas en el id («claude-sonnet-5-5») vuelven a llevar punto.
-  return words.join(" ").replace(/(\d) (?=\d+(?: |$))/g, "$1.");
-}
 /** Para qué conviene cada modelo de la suscripción, en pocas palabras (por id, sin proveedor). */
 const modelUse = (id: string): string | undefined => ({
   auto: t("Elige solo; cambia si un proveedor falla", "Picks for you; switches if a provider fails"),
@@ -485,12 +485,40 @@ async function pickModelSpec(io: CommandIO, title: string, strong?: string): Pro
   // Sin lista del proveedor (simulado o uno propio) igual se abre el menú, con «otro…» para escribirlo.
   // El actual va siempre, aunque el proveedor no lo liste (p. ej. «auto»): si no, nada queda marcado y elegirlo no hace nada.
   const list = !current || models.some((model) => model.spec === current) ? models : [{ spec: current }, ...models];
-  const at = Math.max(0, list.findIndex((model) => model.spec === current));
+  let at = Math.max(0, list.findIndex((model) => model.spec === current));
   const rows = [...list.map((model) => modelRow(model, current)), { label: t("otro…", "other…"), hint: t("escribir proveedor/modelo", "type provider/model") }];
   const footer = others.length ? t(`otros proveedores: ${others.join(", ")}`, `other providers: ${others.join(", ")}`) : models.some((model) => model.price) ? t("tarifas en USD por millón: entrada / caché / salida", "USD per million: input / cache / output") : current;
-  const choice = await io.pick(title, rows, { at, footer });
-  if (choice === undefined || (choice === at && list[at]?.spec === current)) return undefined;
-  const value = choice === list.length ? (await io.input(t("proveedor/modelo", "provider/model")))?.trim() : list[choice]!.spec;
+  const personal = strong === undefined ? await selectablePersonal(Boolean(io.openClaudeModel)) : [];
+  if (strong === undefined) {
+    rows.pop();
+    const selected = io.personalActive?.();
+    for (const entry of personal) {
+      const active = selected?.provider === entry.provider && selected?.model === entry.model && selected?.base === entry.base && selected?.subscription === entry.subscription;
+      if (active) at = rows.length;
+      const row = personalRow(entry);
+      rows.push({ ...row, hint: row.hint + (active ? " · ✓" : "") });
+    }
+    rows.push({ label: t("Otros", "Other"), hint: t("conectar modelo o escribir proveedor/modelo", "connect model or type provider/model") });
+  }
+  const choice = await io.pick(title, rows, { at, footer, search: true });
+  if (choice !== undefined && strong === undefined && choice >= list.length) {
+    if (choice < rows.length - 1) {
+      const entry = personal[choice - list.length]!;
+      if (entry.nativeClaude) io.openClaudeModel?.(entry.model);
+      else io.selectPersonal?.(entry);
+      return;
+    }
+    const action = await io.pick(t("Otros", "Other"), [t("Conectar modelo…", "Connect model…"), t("Escribir proveedor/modelo", "Type provider/model")]);
+    if (action === undefined) return;
+    if (action === 0) {
+      const connection = await connectPersonal(io);
+      if (connection?.nativeClaude) io.openClaudeModel?.(connection.model);
+      else if (connection) io.selectPersonal?.(connection);
+      return;
+    }
+  }
+  if (choice === undefined || (!io.personalActive?.() && choice === at && list[at]?.spec === current)) return undefined;
+  const value = choice === rows.length - 1 ? (await io.input(t("proveedor/modelo", "provider/model")))?.trim() : list[choice]!.spec;
   return value || undefined;
 }
 
@@ -499,10 +527,11 @@ async function modelCommand(io: CommandIO, arg: string): Promise<Panel | null> {
   // «/modelo fuerte [nombre]»: el modelo fuerte, el que razona a pedido del base.
   const [first = "", ...rest] = arg.trim().split(/\s+/);
   if (/^(fuerte|strong)$/i.test(first)) return strongCommand(io, rest.join(" "));
-  if (arg) return fromLines(title, await io.ask("model", { value: arg }), { tone: "ok" });
-  const value = await pickModelSpec(io, title);
+  const value = arg || await pickModelSpec(io, title);
   if (value === undefined) return null;
-  return fromLines(title, await io.ask("model", { value }), { tone: "ok" });
+  const lines = await io.ask("model", { value });
+  io.selectPersonal?.();
+  return fromLines(title, lines, { tone: "ok" });
 }
 
 /** /modelo fuerte: ver o cambiar el modelo que consultan deep_reason y delegate con strong. */
@@ -790,7 +819,7 @@ export function buildCommands(): CommandSpec[] {
     { name: "deteccion", aliases: ["detection", "detección"], description: "Modo purple: señales esperadas vs detectadas, y gaps por acción", run: (io) => panelOf("detección", () => io.ask("deteccion"))() },
     { name: "razonamiento", aliases: ["reasoning", "effort"], description: "Razonamiento previo del modelo: prenderlo, apagarlo o elegir cuánto razona", usage: "si | no | defecto | bajo | medio | alto | max", run: (io, arg) => choose(io, { name: "razonamiento", op: "reasoning", title: t("razonamiento", "reasoning"), options: reasoningOptions }, arg) },
     { name: "senuelos", aliases: ["decoys", "señuelos"], description: t("Señuelos del objetivo: permitir o bloquear los detectados; marcar, quitar o listar los que ya sabés que son trampas", "Target decoys: allow or block detected ones; mark, remove or list the ones you know are traps"), usage: "permitir | bloquear | marcar <host|URL|/ruta> [motivo] | quitar <patrón|n> | lista", run: async (io, arg) => /^(marcar|mark|agregar|add|quitar|sacar|desmarcar|unmark|remove|lista|listar|ver|list|marcados)\b/i.test(arg.trim()) ? fromLines(t("señuelos marcados", "marked decoys"), await io.ask("decoy_marks", { value: arg.trim() }), { tone: "ok" }) : choose(io, { name: "senuelos", op: "decoys", title: t("señuelos", "decoys"), options: decoyOptions }, arg) },
-    { name: "modelo", aliases: ["model"], description: "Ver los modelos disponibles o cambiar el de la sesión (el base) o el fuerte", usage: "[nombre] | fuerte [nombre]", run: modelCommand },
+    { name: "modelo", aliases: ["model", "modelos", "models"], description: "Ver los modelos disponibles o cambiar el de la sesión (el base) o el fuerte", usage: "[nombre] | fuerte [nombre]", run: modelCommand },
     { name: "router", aliases: ["ruteo"], description: t("Router de modelos: el ejecutor hace el bucle y el fuerte decide sobre traspasos; modo, estado y ahorro", "Model router: the executor runs the loop and the strong decides on handoffs; mode, status and savings"), usage: "auto | fijo | estado | medio <modelo>|no", run: routerCommand },
     { name: "agente", aliases: ["agent"], description: "User-Agent con el que me identifico", usage: "<texto> | defecto", run: async (io, arg) => {
       const title = "User-Agent";

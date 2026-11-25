@@ -5,7 +5,6 @@ import { type Client, connectDaemon } from "../client.ts";
 import type { Snapshot } from "../daemon.ts";
 import { Privacidad, entradaPublica, prendido } from "./streamer.ts";
 import { FuenteOBS } from "./obs.ts";
-import { projectPaths } from "../store.ts";
 import { Editor } from "./editor.ts";
 import { type Key, KeyParser, esPegadoConhost } from "./keys.ts";
 import type { Output } from "./screen.ts";
@@ -32,6 +31,13 @@ import { t } from "../idioma.ts";
 import { decodeRows, type SessionRow } from "../sesiones.ts";
 import { bloqueTerminal, comandoDolar, correrComando } from "./dolar.ts";
 import { queueKey } from "../engine.ts";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { openStore, projectPaths, logEvent } from "../store.ts";
+import { loadPersonalReasoning } from "./effort-personal.ts";
+import { personalRow, openPersonalChat } from "./modelos-personales.ts";
+import { clientPath, installClient, personalEnv } from "./clientes-personales.ts";
+import { homedir } from "node:os";
 import { writeSync } from "node:fs";
 import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -188,6 +194,7 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
     expandidas: new Set(),
     ultimo: { total: 0, desde: new Map<number, number>(), todas: [] as string[], inicio: 0, arriba: 0, alto: 0 },
   });
+  const personalChats = new WeakMap<Sesion, ReturnType<typeof openPersonalChat> & { pending: boolean; stage?: string; requests: number; tokens: number; missing: number; context?: number }>();
   const arreglo = arregloGuardado();
   let forma: Forma = arreglo.forma;
   const divisores = arreglo.divisores;
@@ -789,14 +796,16 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
     }
     const thinking = running && ses.client.status.thinking ? ` ${t("RAZONANDO", "THINKING")} ~${kChars(ses.client.status.thinking)} ` : "";
     const escarapela = simbolos().escarapela ? `${simbolos().escarapela} ` : "";
-    const state = running ? badge(thinking || ` ${escarapela}EN CURSO `) : interrupted ? badgeWarn(" INTERRUMPIDO ") : badge(` ${escarapela}OROBAS `);
-    const spent = ` ${cost.replace(/^API est\. /, "").replace(" / tope ", " / ").replace(/ · proyecto .*/, "")} `;
-    const used = ` ${usage.replace(/^Contexto (\S+) · uso (\S+) tokens/, "$2 tokens · ctx $1")} `;
+    const personal = personalChats.get(ses);
+    const state = personal?.pending ? badge(" " + (personal.stage ?? "Esperando modelo") + " ") : running ? badge(thinking || ` ${escarapela}EN CURSO `) : interrupted ? badgeWarn(" INTERRUMPIDO ") : badge(` ${escarapela}OROBAS `);
+    const spent = personal ? (personal.connection.subscription || personal.connection.chatgptProfile ? " Suscripción " : " API personal ") : ` ${cost.replace(/^API est\. /, "").replace(" / tope ", " / ").replace(/ · proyecto .*/, "")} `;
+    const used = personal ? ` ${personal.tokens || !personal.missing ? personal.tokens : "s/d"} tokens${personal.missing && personal.tokens ? " + s/d" : ""} · ctx ${personal.context ?? "—"} · ${personal.requests} solicitudes ` : ` ${usage.replace(/^Contexto (\S+) · uso (\S+) tokens/, "$2 tokens · ctx $1")} `;
     const queued = ses.client.status.queued ? ` · ${ses.client.status.queued} en cola · /cola` : "";
     const hint = `${running ? `Esc detener${queued}` : interrupted ? "/continuar retoma" : ventanas.length > 1 ? t("F6 ventana · F2 lista · /diseño", "F6 window · F2 list · /diseño") : "/ comandos"}  `;
     const left = state + ((budget ?? 0) >= 0.8 ? badgeWarn : segment)(spent);
     const session = ses.client.status.session ? ` · ${ses.client.status.session.slice(0, 8)}` : "";
-    const model = ses.client.status.model ? ` ${ses.client.status.model.slice(ses.client.status.model.indexOf("/") + 1)}${session} ` : "";
+    const modelName = (personal ? personalRow(personal.connection).label : undefined) ?? ses.client.status.model?.split("/").slice(-1)[0];
+    const model = modelName ? ` ${modelName}${session} ` : "";
     // Navegador del operador: conectado, dormido, sin emparejar o sin autorizar (/navegador dice qué hacer).
     const browser = ses.client.status.browser;
     const nav = browser ? ` ${browser.label} ` : "";
@@ -1240,7 +1249,61 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
 
   /** Lo que un comando puede hacer con la interfaz. */
   const crearCio = (s: Sesion): CommandIO => ({
+    personalActive: () => personalChats.get(s)?.connection,
+    selectPersonal(connection) {
+      if (!connection) { personalChats.delete(s); return; }
+      const chat = openPersonalChat(connection);
+      const db = openStore(projectPaths(options.project ?? process.cwd()));
+      try {
+        const stats = db.prepare(`select count(case when type='personal.start' then 1 end) requests,
+          coalesce(sum(json_extract(payload,'$.tokens')),0) tokens,
+          count(case when type='personal.finish' and json_extract(payload,'$.tokens') is null then 1 end) missing
+          from events where session_id=? and type in ('personal.start','personal.finish')`).get(idDe(s))!;
+        personalChats.set(s, { ...chat, pending: false, requests: Number(stats.requests), tokens: Number(stats.tokens), missing: Number(stats.missing) });
+      } finally { db.close(); }
+      say([chat.title + t(" · chat personal · /ayuda para ver los comandos", " · personal chat · /help for commands")], "normal", s);
+    },
+    ...(!options.io ? { openClaudeModel(model: string) {
+      const binary = clientPath("claude");
+      if (!binary) throw new Error("No se encontró Claude Code.");
+      release();
+      pantalla.salir();
+      try {
+        const result = spawnSync(binary, ["--model", model, "--tools", ""], { cwd: homedir(), env: personalEnv(), stdio: "inherit" });
+        if (result.error || result.status !== 0) throw new Error("Claude Code terminó sin completar la sesión.");
+      } finally {
+        pantalla.entrar();
+        release = listen();
+        draw();
+      }
+    } } : {}),
+    async loginCLI(client) {
+      let binary = clientPath(client);
+      if (!binary) {
+        const choice = await pick(t(`Falta ${client}. ¿Instalar y continuar? (S/n)`, `Install ${client} and continue? (Y/n)`), [t("Sí", "Yes"), "No"]);
+        if (choice !== 0) return false;
+      }
+      release();
+      pantalla.salir();
+      try {
+        if (!binary) { installClient(client); binary = clientPath(client); }
+        if (!binary) throw new Error(t("No encontré el cliente después de instalarlo.", "Client executable missing after installation."));
+        const args = { claude: ["auth", "login", "--claudeai"], codex: ["login", "--device-auth"], kimi: ["login"], agy: ["acp", "--login"] }[client];
+        const result = spawnSync(binary, args, { cwd: homedir(), env: personalEnv(), stdio: "inherit" });
+        if (result.error) throw result.error;
+        if (result.status !== 0) throw new Error(t("El proveedor no confirmó el inicio de sesión.", "The provider did not confirm sign-in."));
+        return true;
+      } finally {
+        pantalla.entrar();
+        release = listen();
+        draw();
+      }
+    },
     ask: async (op, payload = {}) => {
+      const connection = personalChats.get(s)?.connection;
+      if (op === "reasoning" && connection) {
+        return loadPersonalReasoning(connection, (payload as { value?: string }).value);
+      }
       const lines = await s.client.ask(op, payload);
       // Un ajuste cambiado con éxito (por su comando o desde /config) queda recordado para este proyecto.
       const value = (payload as { value?: unknown }).value;
@@ -1442,6 +1505,42 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
     if (comando) { user(text); return void dolar(comando); }
     // Con un permiso abierto, Enter sin texto no aplica; un texto se encola igual, pero avisamos.
     if (text.startsWith("/")) return void command(text);
+    const target = ses;
+    const chat = personalChats.get(target);
+    if (chat) {
+      if (chat.pending) { editor.set(raw); return say([t("Esperando la respuesta del modelo.", "Waiting for the model reply.")], "dim", target); }
+      user(text, target);
+      chat.pending = true;
+      chat.stage = undefined;
+      const id = randomUUID();
+      const sessionId = idDe(target);
+      const started = Date.now();
+      const meta = { id, provider: chat.connection.provider, model: chat.connection.model };
+      const trace = (event: string, data: object) => {
+        const db = openStore(projectPaths(options.project ?? process.cwd()));
+        try { logEvent(db, sessionId, event, { ...meta, ...data }); } finally { db.close(); }
+      };
+      void (async () => {
+        trace("personal.start", { text });
+        chat.requests++;
+        draw();
+        const result = await chat.reply(text, stage => {
+          chat.stage = stage;
+          if (!closed) draw();
+        });
+        const tokens = result.usage?.total_tokens;
+        if (typeof tokens === "number") chat.tokens += tokens;
+        else chat.missing++;
+        chat.context = result.usage?.input_tokens ?? result.usage?.prompt_tokens;
+        trace("personal.finish", { text: result.text, usage: result.usage, tokens, durationMs: Date.now() - started });
+        novedad([target.registro.respuestaPersonal(result.text)], target);
+      })().catch(error => {
+        try { trace("personal.error", { message: String(error.message ?? error), durationMs: Date.now() - started }); }
+        catch { say(["No se pudo guardar la traza local."], "warn", target); }
+        say([String(error.message ?? error)], "warn", target);
+      }).finally(() => { chat.pending = false; if (!closed) draw(); });
+      return;
+    }
     if (ses.client.status.needsKey) return void askKey(text);
     if (mode?.kind === "permiso") say(["hay un permiso esperando: el mensaje queda en cola"], "dim");
     // Durante un turno el mensaje espera a que termine (salvo «!…», que interrumpe al modelo, y «¿cómo vamos?»).
@@ -1720,7 +1819,7 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
   };
   if (enVivo) iniciarOBS();
 
-  const release = io.listen((data) => {
+  const listen = () => io.listen((data) => {
     for (const key of esPegadoConhost(data) ? [{ name: "paste", text: data.replace(/\r\n?/g, "\n") }] : parser.parse(data)) {
       onKey(key);
       if (closed) return;
@@ -1729,6 +1828,7 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
   }, () => {
     draw();
   }, exit);
+  let release = listen();
   for (const w of ventanas) pedir(w.activa, w);
   // Avisos del daemon al abrir (carpeta compartida, alcance de una sesión vieja): se ven, no bloquean.
   if (snapshot.avisos?.length) say(snapshot.avisos, "warn");

@@ -64,14 +64,14 @@ test("/modelo sin argumento abre el menú en el actual y sólo cambia si se elig
   await findCommand("modelo")!.run(direct.io, "glm");
   assert.deepEqual(direct.calls, [{ op: "model", payload: { value: "glm" } }]);
   // Sin lista del proveedor el menú igual se abre, con el actual y «otro…» para escribir proveedor/modelo.
-  const bare = fakeIO({ models: ["current\tfaux/faux", "other\topenai"] }, [1], ["openai/gpt-x"]);
+  const bare = fakeIO({ models: ["current\tfaux/faux", "other\topenai"] }, [1, 1], ["openai/gpt-x"]);
   await findCommand("modelo")!.run(bare.io, "");
-  assert.deepEqual(bare.picked[0]!.labels, ["Simulado", "otro…"]);
+  assert.deepEqual(bare.picked[0]!.labels, ["Simulado", "Otros"]);
   assert.deepEqual(bare.calls.at(-1), { op: "model", payload: { value: "openai/gpt-x" } });
   // Un actual que el proveedor no lista va primero y marcado; elegir otro sí cambia.
   const unlisted = fakeIO({ models: ["current\torobas/auto", "model\torobas/a\tA\testandar"] }, [1]);
   await findCommand("modelo")!.run(unlisted.io, "");
-  assert.deepEqual(unlisted.picked[0]!.labels, ["Auto", "A", "otro…"]);
+  assert.deepEqual(unlisted.picked[0]!.labels, ["Auto", "A", "Otros"]);
   assert.equal(unlisted.picked[0]!.at, 0);
   assert.deepEqual(unlisted.calls.at(-1), { op: "model", payload: { value: "orobas/a" } });
   assert.equal(modelRow({ spec: "orobas/a", kind: "estandar" }, "").hint, "Estándar");
