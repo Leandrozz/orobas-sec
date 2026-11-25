@@ -92,13 +92,18 @@ async function catalog(c: Connection, caps = new Map<string, Effort[]>()): Promi
     }
   }
   const response = await fetch(c.base + "/models", { headers: { ...(key ? { Authorization: "Bearer " + key } : {}), ...(c.oauth ? { "x-goog-user-project": c.oauth.project } : {}) }, redirect: "error", signal: AbortSignal.timeout(4500) });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(c.provider + " · HTTP " + response.status);
   const data = await response.json();
+  const ids: string[] = [];
+  const openCode = c.provider === "OpenCode Zen" || c.provider === "OpenCode Go";
   for (const entry of Array.isArray(data.data) ? data.data : []) {
+    if (typeof entry?.id !== "string" || !entry.id.trim()) continue;
+    if (openCode && entry.type && entry.type !== "chat") continue;
+    ids.push(entry.id);
     const values = entry.supported_reasoning_levels ?? entry.supported_reasoning_efforts;
     if (typeof entry.id === "string" && Array.isArray(values)) caps.set(entry.id, values.map(v => typeof v === "string" ? v : v?.effort).filter(isEffort));
   }
-  return Array.isArray(data.data) ? data.data.map((row: {id: string}) => row.id).filter((id: unknown) => typeof id === "string") : [];
+  return ids;
 }
 
 export function personalRow(c: Connection) {
