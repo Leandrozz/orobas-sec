@@ -155,10 +155,6 @@ function BorrarSiVacias([string[]]$carpetas) {
     try { [IO.Directory]::Delete($c) } catch { }
   }
 }
-function EscribirCmd($ruta) {
-  $lineas = '@setlocal', '@set "L=%~dp0cyber-lanzador.ps1"', '@if not exist "%L%" set "L=%~dp0cyber.ps1"', '@powershell -NoProfile -ExecutionPolicy Bypass -File "%L%" %*'
-  [IO.File]::WriteAllText($ruta, (($lineas -join "`r`n") + "`r`n"), [Text.Encoding]::ASCII)
-}
 
 if ($Ayuda) {
   Write-Host 'install.ps1 [-Version vX.Y.Z] [-Prefix DIR] [-Bin DIR] [-Si] | -Desinstalar [-Si]'
@@ -223,7 +219,7 @@ if ($Previa) { Write-Host "$(t 'Instalada ahora' 'Installed now'): $Previa" }
 Write-Host ''
 Write-Host (t 'Voy a hacer esto:' 'I will do this:')
 Write-Host "  1. $(t 'Bajar de' 'Download from') $ReleasesUrl/download/$Version/"
-Write-Host '       SHA256SUMS, SHA256SUMS.sig, cyber-lanzador.ps1, install.ps1'
+Write-Host '       SHA256SUMS, SHA256SUMS.sig, cyber-lanzador.ps1, cyber.cmd, install.ps1'
 Write-Host "     $(t 'y verificar la firma y la suma SHA-256 de cada uno.' 'and verify the signature and the SHA-256 of each one.')"
 Write-Host "  2. $(t 'Instalar el lanzador en' 'Install the launcher in') $Bin (cyber-lanzador.ps1 $(t 'y' 'and') cyber.cmd)."
 Write-Host "  3. $(t 'Guardar este instalador en' 'Keep this installer in') $Prefix ($(t 'para' 'for') -Desinstalar)."
@@ -246,7 +242,7 @@ try {
   BajarArchivo "$base/SHA256SUMS" (Join-Path $tmp 'SHA256SUMS')
   BajarArchivo "$base/SHA256SUMS.sig" (Join-Path $tmp 'SHA256SUMS.sig')
   VerificarLista $tmp $Version
-  foreach ($f in 'cyber-lanzador.ps1', 'install.ps1') {
+  foreach ($f in 'cyber-lanzador.ps1', 'cyber.cmd', 'install.ps1') {
     $esperada = SumaFirmada $tmp $f
     if (-not $esperada) { throw ((t "el release $Version no trae $f en SHA256SUMS (release incompleto o sin modo contenedor). No instalo nada." "release $Version has no $f in SHA256SUMS (incomplete release or no container mode). Nothing installed.")) }
     BajarArchivo "$base/$f" (Join-Path $tmp $f)
@@ -255,12 +251,14 @@ try {
   $errores = $null
   [void][Management.Automation.Language.Parser]::ParseFile((Join-Path $tmp 'cyber-lanzador.ps1'), [ref]$null, [ref]$errores)
   if ($errores) { throw (t 'el lanzador del release no es un script de PowerShell válido' 'the release launcher is not a valid PowerShell script') }
+  # El cyber.cmd del release tiene que llamar a cyber-lanzador.ps1 (es lo que -Desinstalar reconoce como suyo: EsNuestro).
+  if ((Get-Content -LiteralPath (Join-Path $tmp 'cyber.cmd') -Raw) -notmatch 'cyber-lanzador\.ps1') { throw (t 'el cyber.cmd del release no llama a cyber-lanzador.ps1' 'the release cyber.cmd does not call cyber-lanzador.ps1') }
   Write-Host (t 'Firma y sumas verificadas.' 'Signature and checksums verified.')
 
   New-Item -ItemType Directory -Force $Bin, $Prefix | Out-Null
   Copy-Item (Join-Path $tmp 'cyber-lanzador.ps1') "$Lanzador.nuevo" -Force
   Move-Item "$Lanzador.nuevo" $Lanzador -Force
-  EscribirCmd "$Cmd.nuevo"
+  Copy-Item (Join-Path $tmp 'cyber.cmd') "$Cmd.nuevo" -Force
   Move-Item "$Cmd.nuevo" $Cmd -Force
   $viejo = Join-Path $Bin 'cyber.ps1'  # el lanzador de instalaciones viejas; un cyber.ps1 que no es nuestro no se toca
   if (EsNuestro $viejo) { Remove-Item -LiteralPath $viejo -Force -ErrorAction SilentlyContinue }

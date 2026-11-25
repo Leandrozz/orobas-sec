@@ -7,6 +7,10 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 const LANZADOR = resolve("distro/lanzador/cyber");
+// Las pruebas fijan una imagen privada de ghcr.io: así el login se prueba igual en una copia cuya imagen por defecto
+// es privada y en una cuya imagen por defecto es la pública, que nunca pide token.
+const PRIVADA = "ghcr.io/ejemplo/privada:latest";
+const PUBLICA = "ghcr.io/leandrozz/orobas-sec:latest";
 // docker falso: anota sus argumentos en $T/log y responde según las variables F_*.
 const DOCKER_FALSO = `echo "$*" >>"$T/log"
 case "$1 $2" in
@@ -52,7 +56,7 @@ function entorno(extra: Record<string, string> = {}, secretTool = true) {
   falso("open", 'echo "open $*" >>"$T/log"; : >"$T/arrancado"');
   const proyecto = join(t, "mi proyecto");
   mkdirSync(proyecto);
-  const env: Record<string, string> & { HOME: string; F_LLAVE: string } = { PATH: `${bin}:/usr/bin:/bin`, HOME: join(t, "home"), T: t, LANG: "es_AR.UTF-8", F_LLAVE: "S".repeat(43) + "=", ...extra };
+  const env: Record<string, string> & { HOME: string; F_LLAVE: string } = { PATH: `${bin}:/usr/bin:/bin`, HOME: join(t, "home"), T: t, LANG: "es_AR.UTF-8", F_LLAVE: "S".repeat(43) + "=", CYBER_IMAGE: PRIVADA, ...extra };
   mkdirSync(env.HOME);
   const correr = (args: string[] = [], entrada = "", script = LANZADOR) => spawnSync("sh", [script, ...args], {
     cwd: proyecto, env, encoding: "utf8",
@@ -93,7 +97,7 @@ test("lanzador: imagen distinta, n no hace pull y s sí", () => {
   assert.doesNotMatch(e.leer("log"), /^pull/m);
   e = entorno({ F_REMOTO: "sha256:abc123" });
   e.correr([], "s\n");
-  assert.match(e.leer("log"), /^pull ghcr\.io\/leandrozz\/elevate-cyber:latest/m);
+  assert.match(e.leer("log"), /^pull ghcr\.io\/ejemplo\/privada:latest$/m);
 });
 
 test("lanzador: Enter responde que sí a la actualización y el aviso dice [S/n]", () => {
@@ -277,11 +281,12 @@ test("lanzador: nunca se baja de main; la imagen por defecto sólo vale en una c
   const f = readFileSync(LANZADOR, "utf8");
   assert.doesNotMatch(f, /raw\.githubusercontent\.com|\/main\//);
   assert.match(f, /^RELEASES_URL=\$\{CYBER_RELEASES_URL:-https:\/\/github\.com\/Leandrozz\/orobas-sec\/releases\}$/m);
-  assert.match(f, /^IMAGEN=\$\{CYBER_IMAGE:-\$\{IMAGEN_RELEASE:-ghcr\.io\/leandrozz\/elevate-cyber:latest\}\}$/m);
+  assert.match(f, /^IMAGEN=\$\{CYBER_IMAGE:-\$\{IMAGEN_RELEASE:-ghcr\.io\/leandrozz\/[a-z0-9._-]+:latest\}\}$/m);
+  assert.match(f, /^IMAGEN_PUBLICA=ghcr\.io\/leandrozz\/orobas-sec$/m);
 });
 
 test("lanzador: con una imagen fijada por digest no consulta el manifiesto al arrancar", () => {
-  const e = entorno({ F_REMOTO: "sha256:otra" });
+  const e = entorno({ F_REMOTO: "sha256:otra", CYBER_IMAGE: "" });
   const copia = join(e.t, "cyber");
   writeFileSync(copia, readFileSync(LANZADOR, "utf8").replace(/^IMAGEN_RELEASE=''.*$/m, `IMAGEN_RELEASE='ghcr.io/x/y@sha256:${"a".repeat(64)}'`));
   const r = e.correr([], "s\n", copia);
@@ -337,6 +342,19 @@ test("lanzador: el pull muestra su avance; sin usuario o token no hay login y se
   assert.equal(r.status, 1);
   assert.match(r.stderr, /Sin usuario o token/);
   assert.doesNotMatch(e.leer("log"), /^login/m);
+});
+
+test("lanzador: con la imagen pública un rechazo de ghcr.io no pide usuario ni token: explica docker logout y sale con 1", () => {
+  for (const imagen of [PUBLICA, `ghcr.io/leandrozz/orobas-sec@sha256:${"b".repeat(64)}`]) {
+    const e = entorno({ CYBER_IMAGE: imagen, F_SIN_IMAGEN: "1", F_NO_AUTORIZADO: "1", F_GHCR: "u:T0KEN" });
+    const r = e.correr([], "mi-usuario\nTOKEN\n");
+    assert.equal(r.status, 1, imagen);
+    assert.match(r.stderr, /imagen pública, que se baja sin login.*docker logout ghcr\.io/);
+    assert.doesNotMatch(r.stderr, /Usuario de GitHub|read:packages/);
+    assert.doesNotMatch(e.leer("log"), /^login/m);
+    assert.doesNotMatch(e.leer("llavero"), /account ghcr/, "ni siquiera busca un token en el llavero");
+    assert.match(e.leer("log"), new RegExp(`^pull ${imagen.replace(/[.]/g, "\\.")}$`, "m"));
+  }
 });
 
 test("lanzador: responder n a abrir Docker pide abrirlo y volver a correr", () => {
@@ -473,6 +491,16 @@ test("lanzador: token sin cifrar y n lo deja y no vuelve a preguntar", () => {
   assert.doesNotMatch(e.leer("log"), /^logout/m);
   assert.doesNotMatch(e.correr([], "s\n").stderr, /¿Lo paso al llavero/);
   assert.ok(!existsSync(join(e.t, "ghcr")));
+});
+
+test("lanzador: con la imagen pública no ofrece pasar al llavero un token de ~/.docker/config.json", () => {
+  const e = entorno({ CYBER_NO_UPDATE: "1", CYBER_IMAGE: PUBLICA });
+  PLANO(e);
+  const r = e.correr([], "s\n");
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /¿Lo paso al llavero/);
+  assert.ok(!existsSync(join(e.t, "ghcr")));
+  assert.doesNotMatch(e.leer("log"), /^logout/m);
 });
 
 test("lanzador: sin secret-tool hace docker login común y avisa una sola vez", () => {

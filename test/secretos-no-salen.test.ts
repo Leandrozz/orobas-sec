@@ -96,7 +96,7 @@ async function sesion(formato: Formato, cerebro: Cerebro = canario) {
   process.env.CYBER_CANARIO_API_TOKEN = CANARIO.entorno;
   // Llave del almacén de prueba: el test no toca el llavero real.
   process.env.CYBER_SECRETS_KEY = Buffer.alloc(32, 9).toString("base64");
-  delete process.env.CYBER_TRAZAS;
+  process.env.CYBER_TRAZAS = "compartir"; // estas pruebas miran lo que sale al compartir, que se elige a mano
   forgetKey();
   writeSecret("bugcrowd", CANARIO.almacen);
   const transport: Transport = formato === "openai" ? openAICompletions : anthropicMessages;

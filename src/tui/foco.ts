@@ -811,12 +811,13 @@ export function startFoco(client: Client, snapshot: Snapshot, options: { cwd?: s
     // mientras corre. Lo abrió el operador: le gana el lugar al modelo y al router en reposo.
     const inv = ses.client.status.investigacion;
     const invPaint = (text: string) => (inv?.activa ? badge : segment)(text);
-    const pieces = { used: [used, segmentDim], model: [model, segment], rt: [router ? ` ${router.label} ` : "", rtPaint], rts: [router?.short ? ` ${router.short} ` : "", rtPaint], nav: [nav, navPaint], inv: [inv ? ` ${inv.label} ` : "", invPaint], invs: [inv ? ` ${inv.short} ` : "", invPaint] } as const;
+    const plan = ses.client.status.chatgptPlan ? " " + ses.client.status.chatgptPlan + " " : "";
+    const pieces = { used: [used, segmentDim], model: [model, segment], plan: [plan, segmentDim], rt: [router ? ` ${router.label} ` : "", rtPaint], rts: [router?.short ? ` ${router.short} ` : "", rtPaint], nav: [nav, navPaint], inv: [inv ? ` ${inv.label} ` : "", invPaint], invs: [inv ? ` ${inv.short} ` : "", invPaint] } as const;
     type Piece = keyof typeof pieces;
     const fits = (...parts: string[]) => visibleWidth(parts.join("") + hint) <= width;
     const base: Piece[][] = router?.active
-      ? [["used", "model", "rt", "nav"], ["used", "model", "rt"], ["used", "rt"], ["used", "rts"], ["rt"], ["rts"], ["used"]]
-      : [["used", "model", "rt", "nav"], ["used", "model", "nav"], ["used", "model", "rt"], ["used", "model"], ["used", "nav"], ["used"]];
+      ? [["used", "model", "plan", "rt", "nav"], ["model", "plan", "rt"], ["plan"], ["used", "model", "rt", "nav"], ["used", "model", "rt"], ["used", "rt"], ["used", "rts"], ["rt"], ["rts"], ["used"]]
+      : [["used", "model", "plan", "rt", "nav"], ["used", "model", "plan"], ["model", "plan"], ["plan"], ["used", "model", "rt", "nav"], ["used", "model", "nav"], ["used", "model", "rt"], ["used", "model"], ["used", "nav"], ["used"]];
     const combos: Piece[][] = inv
       ? [["used", "model", "inv", "rt", "nav"], ["used", "model", "inv", "rt"], ["used", "model", "inv"], ...(router?.active ? [["used", "inv", "rts"] as Piece[]] : []), ["used", "inv"], ["used", "invs"], ["inv"], ["invs"], ...base]
       : base;

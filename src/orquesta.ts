@@ -10,7 +10,7 @@ import { basename, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { Tool, ToolResult } from "./agent.ts";
 import type { Artifacts } from "./artifacts.ts";
-import { exec, which } from "./exec.ts";
+import { exec, SIN_TELEMETRIA, which } from "./exec.ts";
 import type { ShellConfirmInfo, ShellPermissions } from "./shell.ts";
 
 export type HarnessId = "claude" | "codex" | "pi" | "opencode" | "cyber";
@@ -205,7 +205,7 @@ export class Orquesta {
       }
     }
     writeFileSync(run.log, `# ${new Date(run.startedAt).toISOString()} · ${spec.label} · ${cwd}\n# ${command}\n\n`);
-    const env = { ...process.env, CYBER_ORQUESTA_RUN: id, CYBER_ORQUESTA_PARENT: run.sessionId } as Record<string, string>;
+    const env = { ...process.env, ...SIN_TELEMETRIA, CYBER_ORQUESTA_RUN: id, CYBER_ORQUESTA_PARENT: run.sessionId } as Record<string, string>;
     const child = spawn(bin, argv, { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     this.procs.set(id, child);
     run.state = "corriendo";

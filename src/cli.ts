@@ -94,6 +94,7 @@ const OPCIONES = {
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
   chequeo: { type: "boolean" },
+  modelo: { type: "boolean" },
 } as const;
 // «cyber ci»: la corrida para integración continua tiene sus propias opciones y no pasa por el daemon (src/ci/).
 if (process.argv[2] === "ci") {
@@ -107,7 +108,7 @@ const { values, positionals } = leerArgs();
 
 let pantallaProtegida = values.obs !== undefined || (!values["no-streamer"] && (!!values.streamer || prendido(process.env.CYBER_STREAMER)));
 
-const VIEWS: Record<string, string> = { costos: "costos", uso: "uso", memoria: "memoria", evidencia: "evidencia", jobs: "jobs", sesiones: "sesiones", scope: "scope", findings: "findings", cobertura: "cobertura", grafo: "grafo", informe: "informe", trayectorias: "trayectorias", cves: "cves" };
+const VIEWS: Record<string, string> = { costos: "costos", uso: "uso", memoria: "memoria", evidencia: "evidencia", jobs: "jobs", sesiones: "sesiones", scope: "scope", findings: "findings", cobertura: "cobertura", grafo: "grafo", informe: "informe", trayectorias: "trayectorias", cves: "cves", mejoras: "mejoras" };
 
 
 /** Opción oculta del lanzador: las tres carpetas montadas existen como montaje y se pueden escribir. */
@@ -209,6 +210,19 @@ async function main(): Promise<void> {
     console.log(`[${new Date().toISOString()}] daemon de Cyber en ${daemon.path} (pid ${process.pid})`);
     for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => daemon.close());
     return;
+  }
+  if (command === "chatgpt" || ((command === "login" || command === "logout") && rest[0] === "chatgpt")) {
+    const { chatgptOp } = await import("./chatgpt.ts");
+    const { chatgptLogin, chatgptMenu } = await import("./menu.ts");
+    const show = (lines: string[]) => console.log(lines.map((line) => "  " + linkify(line)).join("\n"));
+    // En el contenedor, el daemon posee el puerto publicado del callback OAuth.
+    const client = inContainer() ? await connectDaemon(cwd) : undefined;
+    try {
+      const ask = (_op: string, payload: object) => client ? client.ask("chatgpt", payload) : chatgptOp(payload);
+      if (command === "logout") return void show(await ask("chatgpt", { action: "logout" }));
+      const io = { ask, pick: pickInTerminal, notice: (lines: string[]) => show(lines) };
+      return void show(await (command === "login" ? chatgptLogin(io) : chatgptMenu(io)));
+    } finally { await client?.leave(); }
   }
   if (command === "login" || command === "logout") {
     if (rest[0] === "cyber-bounty") {
@@ -315,7 +329,7 @@ async function main(): Promise<void> {
   if (values.detach && inContainer()) throw new Error(t("--detach no sirve con Docker: el turno terminaría al cerrarse el contenedor. Usá -p sin --detach.", "--detach does not work with Docker: the turn would end when the container closes. Use -p without --detach."));
   const client = await connectDaemon(cwd);
   if (command) {
-    console.log((await client.view(VIEWS[command]!, rest.join(" "), session)).join("\n"));
+    console.log((await client.view(VIEWS[command]!, command === "mejoras" && values.modelo ? `${rest.join(" ")} modelo`.trim() : rest.join(" "), session)).join("\n"));
     return client.leave();
   }
 

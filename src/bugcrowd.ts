@@ -6,6 +6,7 @@
 import { avisoDeCabeceras, textoDePolitica } from "./politica-cabeceras.ts";
 import { readSecret } from "./secretos.ts";
 import { parseRule, scopeView, type ScopeRule, type ScopeStore } from "./scope.ts";
+import { extraerReglas, type ReglasPrograma } from "./reglas-programa.ts";
 
 export interface BBProgram {
   handle: string;
@@ -19,6 +20,7 @@ export interface BBScope {
   exclude: ScopeRule[];
   saltados: string[];
   avisoCabeceras?: string;
+  reglas?: ReglasPrograma;
 }
 
 /** Token de Bugcrowd: env primero, después el almacén cifrado. */
@@ -81,7 +83,8 @@ export async function bugcrowdScope(token: string, handle: string, fetchImpl: ty
     } catch { saltados.push(asset.value.slice(0, 60)); }
   }
   const avisoCabeceras = avisoDeCabeceras(brief?.policy, brief?.description);
-  return { include, exclude, saltados, ...(avisoCabeceras ? { avisoCabeceras } : {}) };
+  const reglas = extraerReglas([{ texto: brief?.policy, fuente: `Bugcrowd ${handle}, política` }, { texto: brief?.description, fuente: `Bugcrowd ${handle}, descripción` }, ...((Array.isArray(targets) ? targets : []) as any[]).map((target, index) => ({ texto: target?.description, fuente: `Bugcrowd ${handle}, activo ${index + 1}` }))]);
+  return { include, exclude, saltados, reglas, ...(avisoCabeceras ? { avisoCabeceras } : {}) };
 }
 
 /** Token de acceso de Intigriti (client_credentials: es una credencial de máquina, no un usuario). */
@@ -128,7 +131,8 @@ export async function intigritiScope(token: string, handle: string, fetchImpl: t
     } catch { saltados.push(value.slice(0, 60)); }
   }
   const avisoCabeceras = avisoDeCabeceras(program?.policy, program?.rulesOfEngagement, program?.description);
-  return { include, exclude, saltados, ...(avisoCabeceras ? { avisoCabeceras } : {}) };
+  const reglas = extraerReglas([{ texto: program?.policy, fuente: `Intigriti ${handle}, política` }, { texto: program?.rulesOfEngagement, fuente: `Intigriti ${handle}, reglas` }, ...((program?.endpoints ?? []) as any[]).map((endpoint, index) => ({ texto: endpoint?.description ?? endpoint?.weblogic, fuente: `Intigriti ${handle}, activo ${index + 1}` }))]);
+  return { include, exclude, saltados, reglas, ...(avisoCabeceras ? { avisoCabeceras } : {}) };
 }
 
 /** Líneas de vista de programas, mismo formato que programLines de HackerOne. */
@@ -148,7 +152,7 @@ export async function importBBScope(platform: "bugcrowd" | "intigriti", scope: B
     scope.avisoCabeceras,
   ].filter(Boolean).join("\n");
   const { saved, kept } = store.saveProgram({
-    source: `${platform}:${handle}`, include: scope.include, exclude: scope.exclude, notes,
+    source: `${platform}:${handle}`, include: scope.include, exclude: scope.exclude, notes, reglas: scope.reglas,
   });
   return [
     `Alcance importado de ${platform} «${handle}»: ${scope.include.length} dentro, ${scope.exclude.length} excluidos (rev ${saved.rev}).`,

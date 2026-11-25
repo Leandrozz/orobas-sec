@@ -411,3 +411,51 @@ test("instalador: armar.sh escribe SHA256SUMS en formato «suma  nombre» aunque
   assert.ok(sumas.length >= 4, "el release trae varios archivos");
   for (const l of sumas) assert.match(l, /^[0-9a-f]{64}  \S+$/, `formato canónico: ${l}`);
 });
+
+// armar.sh sin servidor: el armado de un release, tal como lo corre el workflow de release del repositorio público.
+function armar(nombre: string, imagenDelArchivo: string | undefined, args: string[]) {
+  const d = join(base, nombre);
+  mkdirSync(d, { recursive: true });
+  const repo = repoFalso(d, clave, imagenDelArchivo);
+  const salida = join(d, "dist");
+  const r = spawnSync("sh", [join(repo, "scripts/release/armar.sh"), "v1.2.0", salida, ...args], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...process.env, npm_config_offline: "true", npm_config_update_notifier: "false", npm_config_audit: "false", npm_config_fund: "false" },
+  });
+  const sumas = existsSync(join(salida, "SHA256SUMS")) ? readFileSync(join(salida, "SHA256SUMS"), "utf8") : "";
+  return { repo, salida, r, nombres: sumas.trim().split("\n").filter(Boolean).map((l) => l.split("  ")[1]) };
+}
+
+test("instalador: armar.sh con --imagen fija esa imagen en los lanzadores aunque imagen-release.txt no fije ninguna, y suma cyber.cmd", { skip }, () => {
+  const imagen = `ghcr.io/ejemplo/publica@sha256:${"9f".repeat(32)}`;
+  const { repo, salida, r, nombres } = armar("armar-imagen", undefined, ["--imagen", imagen]);
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.match(r.stdout, new RegExp(`Imagen fijada: ${imagen.replace(/[.]/g, "\\.")}`));
+  assert.deepEqual(nombres, ["cyber-lanzador.ps1", "cyber-lanzador.sh", "cyber.cmd", "install.ps1", "install.sh", "orobas-sec-v1.2.0.tar.gz"]);
+  assert.match(readFileSync(join(salida, "cyber-lanzador.sh"), "utf8"), new RegExp(`^IMAGEN_RELEASE='${imagen}'$`, "m"));
+  assert.match(readFileSync(join(salida, "cyber-lanzador.ps1"), "utf8"), new RegExp(`^\\$ImagenRelease = '${imagen}'$`, "m"));
+  // cyber.cmd va tal cual (fines de línea de Windows) y llama al lanzador con el nombre con que lo instala install.ps1.
+  assert.deepEqual(readFileSync(join(salida, "cyber.cmd")), readFileSync(join(repo, "distro/lanzador/cyber.cmd")));
+  assert.match(readFileSync(join(salida, "cyber.cmd"), "latin1"), /^@set "L=%~dp0cyber-lanzador\.ps1"\r$/m);
+});
+
+test("instalador: armar.sh con --imagen gana sobre imagen-release.txt; una --imagen sin digest frena sin dejar salida", { skip }, () => {
+  const imagen = `ghcr.io/ejemplo/publica@sha256:${"7e".repeat(32)}`;
+  const gana = armar("armar-gana", IMAGEN, ["--imagen", imagen]);
+  assert.equal(gana.r.status, 0, gana.r.stderr);
+  assert.match(readFileSync(join(gana.salida, "cyber-lanzador.sh"), "utf8"), new RegExp(`^IMAGEN_RELEASE='${imagen}'$`, "m"));
+  for (const mala of ["ghcr.io/ejemplo/publica:latest", "ghcr.io/ejemplo/publica@sha256:abc", ""]) {
+    const { salida, r } = armar(`armar-mala-${mala.length}`, IMAGEN, ["--imagen", mala]);
+    assert.equal(r.status, 1, mala);
+    assert.match(r.stderr, /--imagen inválida/);
+    assert.ok(!existsSync(salida), "no hay release a medias");
+  }
+});
+
+test("instalador: armar.sh sin --imagen ni imagen fijada sale sin modo contenedor (ni lanzadores ni cyber.cmd)", { skip }, () => {
+  const { r, nombres } = armar("armar-sin", undefined, []);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /sin modo contenedor/);
+  assert.deepEqual(nombres, ["install.ps1", "install.sh", "orobas-sec-v1.2.0.tar.gz"]);
+});

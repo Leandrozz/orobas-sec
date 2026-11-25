@@ -18,8 +18,9 @@ for (const herramienta of ["investigation_output", "verdict"]) {
   });
 }
 
-// La cita es parte de las trazas (decisión del 22/11): sale tapada en «compartir»; en «local» y «no», queda en la máquina.
-for (const [variable, sale] of [[undefined, true], ["compartir", true], ["local", false], ["no", false]] as const) {
+// La cita es parte de las trazas (decisión del 22/11): sale tapada en «compartir»; en «local» y «no» (el modo por defecto
+// desde el 25/11), queda en la máquina.
+for (const [variable, sale] of [[undefined, false], ["compartir", true], ["local", false], ["no", false]] as const) {
   test(`la cita libre de consentimiento ${sale ? "sale tapada" : "queda en la máquina"} con trazas en ${variable ?? "el modo por defecto"}`, async () => {
     const prev = process.env.CYBER_TRAZAS;
     if (variable === undefined) delete process.env.CYBER_TRAZAS; else process.env.CYBER_TRAZAS = variable;
@@ -31,9 +32,9 @@ for (const [variable, sale] of [[undefined, true], ["compartir", true], ["local"
         cabecera = new Headers(opciones?.headers).get("x-cyber-trazas");
         return new Response(null, { status: 204 });
       };
-      await sendConsent("trayectorias", cita, "huella", "fecha", undefined, recibir, { tapar: (texto) => texto.replace("ejemplo", "‹secreto›") });
+      await sendConsent("trayectorias", cita, "huella", "fecha", "oro_prueba", recibir, { tapar: (texto) => texto.replace("ejemplo", "‹secreto›") });
       assert.equal(envio.hash, "huella");
-      assert.equal(cabecera, variable === undefined ? "compartir" : variable);
+      assert.equal(cabecera, variable ?? "no");
       assert.equal(JSON.stringify(envio).includes("Frase privada"), sale);
       assert.ok(!JSON.stringify(envio).includes("DatoFicticio7382"), "un secreto con forma conocida nunca sale");
       if (sale) assert.match(envio.pedido, /mi cuenta de ‹secreto›/, "pasa por el tapado de la sesión");

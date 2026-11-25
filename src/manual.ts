@@ -26,6 +26,7 @@ ALCANCE Y HALLAZGOS
   cyber scope [add|excluir|quitar <reglas>|limpiar|recuperar <rev>|sesiones|cabecera Nombre: valor]   alcance de la sesión y cabeceras fijas del proyecto
   cyber findings [todos | id [estado motivo]]         hallazgos del proyecto (con -s, de esa sesión)
   cyber informe [en] [proyecto]  informe Markdown del proyecto (con -s, de esa sesión); «en»: textos fijos en inglés
+  cyber mejoras [N] [--modelo]  diagnóstico local de las últimas N sesiones; --modelo redacta propuestas con el modelo fuerte y le manda sólo tipo, sesión, pasos, conteos y herramienta (con secretos tapados), nunca errores, motivos ni rutas
   cyber cobertura              cobertura de la evaluación de la última sesión
   cyber grafo [faltantes|vecinos <nodo>|caminos <a> → <b>|hallazgo <id>|exportar json|dot|mermaid]  grafo de hechos de la última sesión (o la de -s)
   cyber cves [actualizar] [N]  CVEs nuevos críticos y altos (Zero Wire): estado del feed, cruces de la sesión, últimos N
@@ -36,6 +37,8 @@ ALCANCE Y HALLAZGOS
 CUENTAS
   cyber orobas                 vincula, renueva o revoca tu clave de orobas
   cyber hackerone              vincula, actualiza o revoca tu cuenta de HackerOne
+  cyber chatgpt                estado, uso y cuentas de ChatGPT (Continue with ChatGPT)
+  cyber login|logout chatgpt   autoriza tu plan con OpenAI o revoca la sesión
   cyber h1 [buscar <texto>|todos|alcance <programa>]  programas de HackerOne; carga el alcance de uno
   cyber <plataforma>           vincula o revoca github, vercel, supabase, aws, gcloud, azure, cloudflare o kubernetes
   cyber login <plataforma>     lo mismo, con el login de la CLI de la plataforma (también hackerone)

@@ -158,11 +158,24 @@ test("lanzador windows: digest distinto, n no baja y s baja; manifest lento no p
 });
 
 test("lanzador windows: sin imagen y unauthorized pide usuario y token y hace login por stdin", { skip }, () => {
-  const { r, log, dir } = correr({ env: { FAKE_SIN_IMAGEN: "1", FAKE_UNAUTH: "1" }, input: "usuario1\ntoken-secreto\n" });
+  // Una imagen privada de ghcr.io: la pública nunca pide token.
+  const { r, log, dir } = correr({ env: { CYBER_IMAGE: "ghcr.io/ejemplo/privada:latest", FAKE_SIN_IMAGEN: "1", FAKE_UNAUTH: "1" }, input: "usuario1\ntoken-secreto\n" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.ok(log.includes("login|ghcr.io|-u|usuario1|--password-stdin|"), log.join("|") + r.stdout + r.stderr);
   assert.equal(readFileSync(join(dir, "login-stdin"), "utf8").trim(), "token-secreto");
   assert.ok(!log.join("\n").includes("token-secreto"));
+});
+
+test("lanzador windows: con la imagen pública muestra que baja la imagen y un rechazo de ghcr.io no pide usuario ni token", { skip }, () => {
+  for (const imagen of ["ghcr.io/leandrozz/orobas-sec:latest", `ghcr.io/leandrozz/orobas-sec@sha256:${"b".repeat(64)}`]) {
+    const { r, log } = correr({ env: { CYBER_IMAGE: imagen, FAKE_SIN_IMAGEN: "1", FAKE_UNAUTH: "1" }, input: "usuario1\ntoken-secreto\n" });
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /Bajando la imagen|Pulling the image/);
+    assert.match(r.stdout, /docker logout ghcr\.io/);
+    assert.doesNotMatch(r.stdout, /read:packages/);
+    assert.ok(log.includes(`pull|${imagen}|`), log.join("\n"));
+    assert.ok(!log.some((l) => l.startsWith("login|")), "no hace login");
+  }
 });
 
 test("lanzador windows: código 75 con reabrir.txt relanza con la otra ruta y -s", { skip }, () => {
@@ -222,7 +235,7 @@ test("lanzador windows: --instalar alcanza con el .ps1 solo: escribe el cyber.cm
 test("lanzador windows: --instalar avisa si un perfil de PowerShell define su propio cyber", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "cyber-ps-"));
   mkdirSync(join(dir, "WindowsPowerShell"));
-  writeFileSync(join(dir, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"), 'function cyber { docker run -it --rm -v "${PWD}:/proyecto" ghcr.io/leandrozz/elevate-cyber @args }\n');
+  writeFileSync(join(dir, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"), 'function cyber { docker run -it --rm -v "${PWD}:/proyecto" ghcr.io/ejemplo/vieja @args }\n');
   const { r } = correr({ dir, args: ["--instalar"], sinDocker: true });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /define su propio «cyber»|defines its own "cyber"/);

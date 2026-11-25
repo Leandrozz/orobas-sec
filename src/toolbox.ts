@@ -465,7 +465,7 @@ export function createNetTools(context: NetContext): Tool[] {
     parameters: obj({ targets: list(str()), headers: HEADERS, timeoutSec: int({ minimum: 10, maximum: 1800 }) }, ["targets"]),
     execute: async (params, signal) => {
       authorizeAll(scope(), params.targets, context.http);
-      const argv = [need("httpx"), "-silent", "-json", "-title", "-status-code", "-tech-detect", "-server", "-rate-limit", String(conductFor(context, "httpx").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http)];
+      const argv = [need("httpx"), "-silent", "-duc", "-json", "-title", "-status-code", "-tech-detect", "-server", "-rate-limit", String(conductFor(context, "httpx").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http)];
       const result = await run(context, "httpx", argv, signal, (params.timeoutSec ?? SCAN_SECONDS) * 1000, params.targets.map((target: string) => plain(target, "target")).join("\n"));
       const rows = jsonLines(result.stdout).map((row) => ({ url: row.url, status: row.status_code, titulo: (row.title ?? "").slice(0, 60), servidor: row.webserver ?? "", tech: (row.tech ?? []).join("+") }));
       return finish(`${rows.length ? encode({ vivos: rows }) : "Ningún host respondió."}\n${result.status} · artefacto ${result.artifact}`, { vivos: rows.length, artefacto: result.artifact });
@@ -506,7 +506,7 @@ export function createNetTools(context: NetContext): Tool[] {
     parameters: obj({ domain: str(), timeoutSec: int({ minimum: 10, maximum: 1800 }) }, ["domain"]),
     execute: async (params, signal) => {
       authorizeAll(scope(), [params.domain], context.http);
-      const result = await run(context, "subfinder", [need("subfinder"), "-silent", "-d", plain(params.domain, "domain")], signal, (params.timeoutSec ?? SCAN_SECONDS) * 1000);
+      const result = await run(context, "subfinder", [need("subfinder"), "-silent", "-duc", "-d", plain(params.domain, "domain")], signal, (params.timeoutSec ?? SCAN_SECONDS) * 1000);
       const all = result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
       const inside = all.filter((host) => decide(scope(), host).allowed);
       return finish(`${inside.length ? inside.slice(0, 300).join("\n") : "Ninguno dentro del alcance."}${all.length > inside.length ? `\n(${all.length - inside.length} subdominios fuera del alcance omitidos; están en el artefacto)` : ""}\n${result.status} · artefacto ${result.artifact}`, { dentro: inside.length, total: all.length, artefacto: result.artifact });
@@ -522,7 +522,7 @@ export function createNetTools(context: NetContext): Tool[] {
       authorizeAll(scope(), [params.url], context.http);
       const origen = new URL(params.url).origin;
       const patronOrigen = `^${origen.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/|$)`;
-      const argv = [need("katana"), "-silent", "-jsonl", "-u", plain(params.url, "url"), "-d", String(params.depth ?? 2), "-rate-limit", String(conductFor(context, "katana").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http), "-field-scope", "fqdn", ...(hayFijas(context.http) ? ["-crawl-scope", patronOrigen, "-disable-redirects"] : [])];
+      const argv = [need("katana"), "-silent", "-duc", "-jsonl", "-u", plain(params.url, "url"), "-d", String(params.depth ?? 2), "-rate-limit", String(conductFor(context, "katana").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http), "-field-scope", "fqdn", ...(hayFijas(context.http) ? ["-crawl-scope", patronOrigen, "-disable-redirects"] : [])];
       const result = await run(context, "katana", argv, signal, (params.timeoutSec ?? SCAN_SECONDS) * 1000);
       const urls = [...new Set(jsonLines(result.stdout).map((row) => row.request?.endpoint ?? row.endpoint).filter(Boolean))];
       const inside = urls.filter((url) => decide(scope(), url).allowed);
@@ -545,7 +545,7 @@ export function createNetTools(context: NetContext): Tool[] {
     parallel: true,
     execute: async (params, signal) => {
       authorizeAll(scope(), params.hosts, context.http);
-      const result = await run(context, "dnsx", [need("dnsx"), "-silent", "-json", "-a", "-aaaa", "-cname"], signal, 120_000, params.hosts.map((host: string) => plain(host, "host")).join("\n"));
+      const result = await run(context, "dnsx", [need("dnsx"), "-silent", "-duc", "-json", "-a", "-aaaa", "-cname"], signal, 120_000, params.hosts.map((host: string) => plain(host, "host")).join("\n"));
       const rows = jsonLines(result.stdout).map((row) => ({ host: row.host, a: (row.a ?? []).join(" "), aaaa: (row.aaaa ?? []).join(" "), cname: (row.cname ?? []).join(" ") }));
       return finish(`${rows.length ? encode({ dns: rows }) : "Sin respuestas."}\n${result.status} · artefacto ${result.artifact}`, { resueltos: rows.length, artefacto: result.artifact });
     },

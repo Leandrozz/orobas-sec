@@ -1,0 +1,13 @@
+{
+  "_": "Datos del runner CVE. La imagen afectada es la predeterminada del compose; la corregida se pasa por CVE_IMAGE. Ver SELECCION.md.",
+  "casos": {
+    "CVE-2026-73612": { "producto": "File Browser", "clase": "control de acceso", "corregida": "filebrowser/filebrowser:v2.63.22@sha256:53571cc5b985e50b238de287612ded4b828274bc4d66c1b24ab120ac58097972", "seed": false },
+    "CVE-2026-52808": { "producto": "Gogs", "clase": "control de acceso", "corregida": "gogs/gogs:0.14.3@sha256:c98ce8153a1dfd215bb0116a9ecf86b4d93c11595b0211b6d094156a718ab00d", "seed": true },
+    "CVE-2026-55066": { "producto": "Vikunja", "clase": "control de acceso", "corregida": "vikunja/vikunja:2.4.0@sha256:b0ebd2242e1282e9d4351bdfa0b077f1cffbcfd09c380411a0eb46cd9651e901", "seed": true },
+    "CVE-2026-118504": { "producto": "Gitea", "clase": "logica de negocio", "corregida": "gitea/gitea:28.3.0@sha256:411af83e9be78029c0047a5f5a72f1d91b7c793ba5e5813b4e70a6bb8e4a0738", "seed": true },
+    "CVE-2026-55381": { "producto": "InvoiceShelf", "clase": "control de acceso", "corregida": "invoiceshelf/invoiceshelf:2.4.0@sha256:4cc67a49c9003711a25d09e694384d9efa46d99fcdde64162232f0bc3b34063d", "seed": true },
+    "CVE-2026-85595": { "producto": "Traefik", "clase": "autenticacion", "corregida": "traefik:v3.7.11@sha256:2b459431e350cfb7a5fd1a432f3bf7ad7787c36ef557c5344b8125e0489de589", "seed": false },
+    "CVE-2026-104203": { "producto": "Traccar", "clase": "autenticacion", "corregida": "traccar/traccar:6.15.0-alpine@sha256:6ee4dc9fce9b73cb75de50afce618bd86a79ee3da0071ae8cc8df8a2ebd896a0", "seed": true },
+    "CVE-2026-35000": { "producto": "changedetection.io", "clase": "inyeccion", "corregida": "dgtlmoon/changedetection.io:0.54.7@sha256:0179240fef0ff5e7cabc52f7670e4d50cebf32d57f02a970ebf2f3a67aca0870", "seed": true }
+  }
+}

@@ -2,6 +2,12 @@
 
 Referencia de la herramienta tal como está hoy.
 
+## ChatGPT como proveedor
+
+Con `cyber login chatgpt` y un modelo `chatgpt/<modelo>`, los pedidos elegibles usan tu plan de ChatGPT. La TUI muestra **Using ChatGPT plan** en el pie; `/chatgpt` muestra la cuenta activa y el enlace [Manage usage](https://chatgpt.com/settings/usage). Si llegás a un límite de la app o del plan, se frenan los nuevos pedidos de ChatGPT durante el lapso que indique OpenAI (`Retry-After`) o, si no lo indica, 15 minutos; después vuelven a salir solos y la primera respuesta buena borra la marca. Podés revisar el límite en ese enlace. Un error de elegibilidad no se reintenta. Si el refresh token deja de servir, ingresá de nuevo.
+
+El ledger registra los tokens informados por Responses con costo marginal USD 0 y fuente «plan de ChatGPT». Es consumo del plan, no una estimación de dinero cobrado por OpenAI. Cada pedido manda el contexto necesario a la API pública de Responses con `store: false` y `stream: true`.
+
 ## Instalar y abrir
 
 Se instala con `install.sh` (Linux y macOS) o `install.ps1` (Windows) de un release firmado: el README dice cómo, y [releases.md](releases.md) qué verifican. En el modo nativo, `cyber` corre el agente con tu Node. En el modo contenedor, `cyber` es el lanzador (un solo archivo, en `distro/lanzador/`): arranca Docker, monta tu proyecto, tus credenciales y tus datos, y abre la TUI en la imagen. Hay uno para Linux y macOS (`cyber`, sh) y otro para Windows (`cyber.ps1`, con `cyber.cmd` que lo llama).
@@ -96,8 +102,14 @@ Escribí `/` y aparece la lista; Tab completa. Salen de `TUI_COMMANDS` en `src/m
 | `/sesiones` | Sesiones del proyecto: retomar, nueva, ramificar, renombrar. Dentro: `/jobs` (`/trabajos`, su estado) y `/continuar` (retoma un turno interrumpido). |
 | `/hallazgos` (también `/findings`) | Lista de hallazgos, detalle por id o cambio de estado. Dentro: `/verificar`, `/verificacion`, `/evidencia`, `/cobertura`, `/grafo`, `/memoria`. |
 | `/informe [en]` | Genera el informe Markdown; con `en`, en inglés. Dentro: `/trayectorias`, `/datos`. |
+| `/mejoras [N] [modelo]` | Diagnostica las últimas N sesiones (10 por defecto, máximo 100) y propone experimentos. `modelo` pide una redacción optativa al modelo fuerte y consume saldo. Por CLI: `cyber mejoras [N] [--modelo]`. |
+
+El detector de bucles avisa en el resultado de la herramienta cuando una sesión vuelve por cuarta vez sobre líneas ya leídas de un archivo o repite una misma ventana (`code_read`, `artifact_read`, o `sed -n`, `awk NR>=` y `cat` simples por shell; paginar sin solaparse no cuenta, y el archivo entero solapa con todo), llama una herramienta con los mismos argumentos por tercera vez (sin contar esperas ni sondeos como `harness_wait` o `mail_wait`; en las que no son puras, como `shell`, también tiene que repetirse el resultado), o completa ocho herramientas seguidas sin hallazgo cambiado, categoría de cobertura marcada ni nodo nuevo del grafo. Cada patrón avisa una sola vez. La nota pide cerrar la hipótesis con una prueba que muestre o refute el efecto, o descartarla en la memoria con el motivo; si hay una grieta concreta abierta, no pide abandonarla sino buscar el efecto con una prueba distinta. No bloquea la ejecución.
+
+`cyber mejoras` usa las trazas de `trazas/` cuando rige `local` y la base local `cyber.db`; con `compartir`, usa sólo la base. Con modo `no`, no consulta ninguna de las dos. El informe muestra sesión y rango de pasos, evidencia resumida, propuesta, hipótesis medible y comandos exactos del bench para comparar `main` con la propuesta en Fénix y, cuando corresponde, CVE afectada y corregida. El gasto que muestra es el tope configurado de esas corridas; el costo de releer contexto es una estimación a partir de caracteres y tarifas registradas, si las hay. No corre el bench ni aplica cambios. `--modelo` consulta los modelos disponibles en el gateway de Elevate y envía al modelo fuerte solamente datos estructurados: tipo de patrón, sesión, rango de pasos, conteos y nombre de herramienta (pasado por el tapado de secretos), con la propuesta y la hipótesis fijas. La evidencia en texto (errores de herramientas, motivos de descarte, rutas) queda en el informe local; nunca manda conversaciones ni trazas desde este comando.
 | `/datos [compartir \| local \| no \| subir]` | Trazas: muestra qué incluyen, qué modo rige y dónde quedan las locales; cambia el modo (también desde `/config`, fila «Trazas») o sube las sesiones anteriores del proyecto (sólo en `compartir`). Por línea de comandos: `cyber datos …`. |
 | `/alcance` (también `/scope`) | Alcance autorizado: ver, `add`, `excluir`, `quitar`, `limpiar`, `referencia` (documentación o código público que el agente sólo lee con `reference_read`, nunca prueba). Cada cambio, venga de donde venga, se avisa con lo que entra y sale. Un laboratorio local: `localhost`, `127.0.0.1` y `::1` son la misma máquina; `127.0.0.1:8899` cubre sólo ese puerto y `localhost` todos. El que levanta el agente en loopback lo suma él con su puerto, sin pedirte cita; una IP de tu red (`192.168.1.20:8080`, `10.0.0.0/8`, `host.docker.internal`) la sumás vos. Dentro: `/senuelos`, `/identidad`, `/consentimiento`, `/permisos`, `/agente`, `/deteccion`. |
+
 | `/limites` | Topes y gasto. Dentro: `/presupuesto <USD>` o `sin`, `/peticiones <N>` o `sin`, `/ritmo <N>` o `sin`, `/costos`. |
 | `/modelo [nombre]` | Sin argumento lista los modelos; con uno, cambia el de la sesión, el modelo base del bucle (por ejemplo `/modelo glm`). Un modelo caro se respeta, pero se avisa cuánto cuesta cada paso. |
 | `/modelo fuerte [nombre\|defecto]` | Modelo fuerte: el que consulta el agente con `deep_reason` para decidir algo difícil, y el de los subagentes que delega con `strong`. Por defecto `cyber-ultra-1.0`. |
@@ -113,6 +125,8 @@ Escribí `/` y aparece la lista; Tab completa. Salen de `TUI_COMMANDS` en `src/m
 | `/ayuda` (también `/help`) | Teclas y comandos. |
 | `/limpiar` (también `/clear`) | Limpia la pantalla y vuelve al sello; conserva sesión y memoria. No funciona con un turno en curso. |
 | `/salir` (también `/quit`) | Salir. |
+
+Las exclusiones del programa y el modelo de confianza se ven en `/alcance` con su cita y fuente. Al importar HackerOne se leen las instrucciones de los activos disponibles (la política general no está en el CSV público); Bugcrowd, Intigriti y Cyber Bounty aportan además el texto de política que devuelven sus APIs. Si falta una regla, dictala con `/alcance reglas exclusion <cita textual>`, `/alcance reglas honesto <cita textual>` o `/alcance reglas atacante <cita textual>`. También podés pedirle al agente que la registre: `session_settings` exige `pedido`, una cita de tu mensaje que contenga el texto exacto. Las reglas quedan en la revisión del alcance de esa sesión y sobreviven a la compactación. Antes de registrar un candidato, el agente debe pasar `exclusion_cercana` (cita exacta de la lista) y `por_que_no_aplica`; sin esos campos queda como pista. Una pista con `fuera_modelo_confianza` cita la premisa que vuelve inviable la hipótesis y cierra esa grieta ante el control de cierre.
 
 Cada grupo abre un menú sin argumento; `/limites presupuesto 5` va directo al miembro. `/cola`, `/ya` y `/orquesta` no salen en la lista de `/` pero siguen andando.
 

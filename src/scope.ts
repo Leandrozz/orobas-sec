@@ -4,6 +4,7 @@
 // distintos, y cargar el de una no puede pisar el de otra. Una sesión nueva empieza sin alcance.
 import { BlockList, isIP } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
+import { bloqueReglas, conCitasDelOperador, reglasVacias, TOPE_CITA, TOPES_REGLAS, type ReglasPrograma, type CitaRegla } from "./reglas-programa.ts";
 
 export interface ScopeRule {
   /** host exacto (con «:puerto», sólo ese puerto), comodín (*.ejemplo.com), red CIDR o URL con prefijo de ruta. */
@@ -28,6 +29,7 @@ export interface Scope {
    * autorizan a probar nada: decide() no las mira.
    */
   reference?: ScopeRule[];
+  reglas?: ReglasPrograma;
 }
 
 export interface Decision {
@@ -288,6 +290,7 @@ export interface ScopeChange {
   unexcluded: string[];
   /** Cambió el programa (o el origen) del alcance. */
   source?: { from: string; to: string };
+  reglas?: boolean;
 }
 
 /** Qué cambió entre dos revisiones, por valor de regla. */
@@ -299,6 +302,7 @@ export function scopeDiff(before: Scope | undefined, after: Scope | undefined): 
     removed: [...inBefore].filter((value) => !inAfter.has(value)),
     excluded: [...outAfter].filter((value) => !outBefore.has(value)),
     unexcluded: [...outBefore].filter((value) => !outAfter.has(value)),
+    ...(JSON.stringify(before?.reglas ?? null) !== JSON.stringify(after?.reglas ?? null) ? { reglas: true } : {}),
     ...(before && after && before.source !== after.source ? { source: { from: before.source, to: after.source } } : {}),
   };
 }
@@ -312,6 +316,7 @@ export function scopeChangeLine(change: ScopeChange): string {
     change.removed.length ? `sale${change.removed.length > 1 ? "n" : ""} ${list(change.removed)}` : "",
     change.excluded.length ? `se excluye${change.excluded.length > 1 ? "n" : ""} ${list(change.excluded)}` : "",
     change.unexcluded.length ? `deja${change.unexcluded.length > 1 ? "n" : ""} de estar excluido${change.unexcluded.length > 1 ? "s" : ""} ${list(change.unexcluded)}` : "",
+    change.reglas ? "cambiaron las reglas del programa" : "",
   ].filter(Boolean).join("; ");
 }
 
@@ -424,7 +429,7 @@ export class ScopeStore {
   project(): Scope | undefined {
     const rows = this.db.prepare("select rev,json,at from scope where rev in (select max(rev) from scope group by session_id) order by rev").all() as ScopeRow[];
     const all = rows.map(parseRow);
-    const defined = all.filter((scope) => scope.include.length || scope.exclude.length);
+    const defined = all.filter((scope) => scope.include.length || scope.exclude.length || scope.reglas && Object.values(scope.reglas).some((citas) => citas.length));
     if (defined.length <= 1) return defined[0] ?? all.at(-1);
     return {
       rev: Math.max(...defined.map((scope) => scope.rev)),
@@ -433,15 +438,16 @@ export class ScopeStore {
       include: dedupe(defined.flatMap((scope) => scope.include)),
       exclude: dedupe(defined.flatMap((scope) => scope.exclude)),
       notes: defined.map((scope) => scope.notes).filter(Boolean).join("\n\n"),
+      reglas: { exclusiones: defined.flatMap((scope) => scope.reglas?.exclusiones ?? []), honestos: defined.flatMap((scope) => scope.reglas?.honestos ?? []), posicionAtacante: defined.flatMap((scope) => scope.reglas?.posicionAtacante ?? []) },
     };
   }
 
   /** Guarda una revisión nueva y la devuelve. */
-  save(next: Pick<Scope, "source" | "include" | "exclude" | "notes" | "reference">): Scope {
+  save(next: Pick<Scope, "source" | "include" | "exclude" | "notes" | "reference" | "reglas">): Scope {
     if (this.sello) throw new Error(`El alcance de esta sesión está sellado: ${this.sello}`);
     const before = this.onChange ? this.current() : undefined;
     const reference = dedupe(next.reference ?? []);
-    const clean = { source: next.source, include: dedupe(next.include), exclude: dedupe(next.exclude), notes: next.notes, ...(reference.length ? { reference } : {}) };
+    const clean = { source: next.source, include: dedupe(next.include), exclude: dedupe(next.exclude), notes: next.notes, ...(reference.length ? { reference } : {}), ...(next.reglas ? { reglas: next.reglas } : {}) };
     const { lastInsertRowid } = this.db.prepare("insert into scope(json,at,session_id) values(?,?,?)").run(JSON.stringify(clean), new Date().toISOString(), this.sessionId ?? null);
     const saved = parseRow(this.db.prepare("select rev,json,at from scope where rev=?").get(lastInsertRowid) as ScopeRow);
     try { this.onChange?.(before, saved); } catch { /* avisar nunca impide guardar */ }
@@ -452,21 +458,22 @@ export class ScopeStore {
    * El alcance de un programa (HackerOne, Bugcrowd, Intigriti) reemplaza al anterior, salvo los destinos
    * locales que el operador ya había autorizado en esta sesión (un laboratorio en 127.0.0.1): ningún
    * programa público los trae, y perderlos a mitad de sesión dejaba el laboratorio «fuera de alcance».
-   * Devuelve lo conservado para decirlo.
+   * Tampoco se pierden las citas de reglas que agregó el operador. Devuelve lo conservado para decirlo.
    */
-  saveProgram(next: Pick<Scope, "source" | "include" | "exclude" | "notes" | "reference">): { saved: Scope; kept: ScopeRule[] } {
+  saveProgram(next: Pick<Scope, "source" | "include" | "exclude" | "notes" | "reference" | "reglas">): { saved: Scope; kept: ScopeRule[] } {
     const previous = this.current();
     const kept = (previous?.include ?? []).filter((rule) => isLocalRule(rule) && !next.include.some((own) => own.value === rule.value) && !next.exclude.some((own) => own.value === rule.value));
-    return { saved: this.save({ ...next, include: [...next.include, ...kept] }), kept };
+    return { saved: this.save({ ...next, include: [...next.include, ...kept], reglas: conCitasDelOperador(previous?.reglas, next.reglas) }), kept };
   }
 
   /** Agrega o quita reglas partiendo de la revisión vigente. */
   edit(change: { include?: Array<string | ScopeRule>; exclude?: string[]; remove?: string[]; reference?: string[] }): Scope {
-    const base = this.current() ?? { source: "manual", include: [], exclude: [], notes: "", reference: [] };
+    const base = this.current() ?? { source: "manual", include: [], exclude: [], notes: "", reference: [], reglas: undefined };
     const gone = new Set((change.remove ?? []).map((value) => { try { return parseRule(value).value; } catch { return value.trim().toLowerCase().replace(/\/+$/, ""); } }));
     return this.save({
       source: base.source,
       notes: base.notes,
+      reglas: base.reglas,
       include: [...base.include.filter((rule) => !gone.has(rule.value)), ...(change.include ?? []).map((item) => (typeof item === "string" ? parseRule(item) : item))],
       exclude: [...base.exclude.filter((rule) => !gone.has(rule.value)), ...(change.exclude ?? []).map((text) => parseRule(text))],
       reference: [...(base.reference ?? []).filter((rule) => !gone.has(rule.value)), ...(change.reference ?? []).map((text) => parseRule(text))],
@@ -477,12 +484,23 @@ export class ScopeStore {
     this.save({ source: "manual", include: [], exclude: [], notes: "" });
   }
 
+  /** Agrega una cita textual del operador sin alterar destinos ni otras reglas. */
+  agregarRegla(tipo: keyof ReglasPrograma, cita: string, fuente = "operador"): Scope {
+    const base = this.current() ?? { source: "manual", include: [], exclude: [], notes: "", reference: [], reglas: undefined };
+    const texto = cita.replace(/\s+/g, " ").trim();
+    if (texto.length < 12 || texto.length > TOPE_CITA) throw new Error(`La cita de una regla debe tener entre 12 y ${TOPE_CITA} caracteres.`);
+    const reglas = base.reglas ?? reglasVacias();
+    const citas: CitaRegla[] = reglas[tipo];
+    if (citas.length >= TOPES_REGLAS[tipo] && !citas.some((item) => item.cita === texto)) throw new Error(`Hay ${TOPES_REGLAS[tipo]} citas de este tipo: condensá las reglas antes de agregar otra.`);
+    return this.save({ ...base, reglas: { ...reglas, [tipo]: citas.some((item) => item.cita === texto) ? citas : [...citas, { cita: texto, fuente }] } });
+  }
+
   /** Copia una revisión cualquiera (de otra sesión o del alcance viejo) como revisión nueva de ésta. La pide el operador. */
   adopt(rev: number): Scope {
     const row = this.db.prepare("select rev,json,at from scope where rev=?").get(rev) as ScopeRow | undefined;
     if (!row) throw new Error(`No existe la revisión ${rev} del alcance.`);
-    const { source, include, exclude, notes, reference } = parseRow(row);
-    return this.save({ source, include, exclude, notes, reference });
+    const { source, include, exclude, notes, reference, reglas } = parseRow(row);
+    return this.save({ source, include, exclude, notes, reference, reglas });
   }
 
   /**
@@ -602,7 +620,7 @@ export function projectScopeTags(db: DatabaseSync): Array<{ session: string; at:
 
 export function scopeView(scope: Scope | undefined): string[] {
   if (!scope || (!scope.include.length && !scope.exclude.length)) {
-    return ["ALCANCE · sin definir", "Sin alcance, ninguna herramienta puede tocar un destino. Es de cada sesión: una nueva empieza vacía (/scope sesiones muestra el de las demás).", "Agregar: /scope add <host | *.dominio | CIDR | URL>   ·   Excluir: /scope excluir <regla>"];
+    return ["ALCANCE · sin definir", "Sin alcance, ninguna herramienta puede tocar un destino. Es de cada sesión: una nueva empieza vacía (/scope sesiones muestra el de las demás).", "Agregar: /scope add <host | *.dominio | CIDR | URL>   ·   Excluir: /scope excluir <regla>", ...bloqueReglas(scope?.reglas).split("\n")];
   }
   const line = (rule: ScopeRule) => `  ${rule.value}${rule.note ? `  — ${rule.note}` : ""}`;
   return [
@@ -615,13 +633,15 @@ export function scopeView(scope: Scope | undefined): string[] {
     ...(scope.reference ?? []).slice(0, 12).map(line),
     ...((scope.reference?.length ?? 0) > 12 ? [`  … ${scope.reference!.length - 12} más`] : []),
     ...(scope.notes ? ["Notas", ...scope.notes.split("\n").slice(0, 8).map((text) => `  ${text}`)] : []),
+    ...bloqueReglas(scope.reglas).split("\n"),
   ];
 }
 
 /** Resumen corto para el modelo. */
-export function scopeBrief(scope: Scope | undefined): string {
-  if (!scope || !scope.include.length) return "sin definir: no hay destinos autorizados";
+export function scopeBrief(scope: Scope | undefined, conReglas = true): string {
+  const bloque = conReglas ? `\n${bloqueReglas(scope?.reglas)}` : "";
+  if (!scope || !scope.include.length) return `sin definir: no hay destinos autorizados${bloque}`;
   const list = (rules: ScopeRule[]) => rules.slice(0, 25).map((rule) => rule.value).join(", ") + (rules.length > 25 ? ` y ${rules.length - 25} más` : "");
   const reference = scope.reference?.length ? ` Lectura de referencia con reference_read (GET, no se prueba): GitHub y ${list(scope.reference)}.` : " Lectura de referencia con reference_read (GET, no se prueba): GitHub.";
-  return `rev ${scope.rev} (${scope.source}). Dentro: ${list(scope.include)}.${scope.exclude.length ? ` Excluido: ${list(scope.exclude)}.` : ""}${reference}`;
+  return `rev ${scope.rev} (${scope.source}). Dentro: ${list(scope.include)}.${scope.exclude.length ? ` Excluido: ${list(scope.exclude)}.` : ""}${reference}${bloque}`;
 }

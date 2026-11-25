@@ -1,6 +1,6 @@
 // Motor de una sesión: agente + contabilidad + memoria + persistencia + compactación.
 // No depende de la interfaz: lo usan el daemon y las pruebas.
-import { cabecerasDePrivacidad, guardaLocal, modoTrazas, respetarRevocacionAnterior } from "./privacidad-trazas.ts";
+import { cabecerasDePrivacidad, guardaLocal, modoTrazas } from "./privacidad-trazas.ts";
 import { DescartesDeTrazas, ID_DE_PEDIDO } from "./descartes-trazas.ts";
 import { anotar, guardarTrayectoria, pieza } from "./trazas-locales.ts";
 import { buildTrajectories, shareTrajectories, SHARE_KIND } from "./trayectorias.ts";
@@ -18,6 +18,7 @@ import { Ledger, storedBudget } from "./ledger.ts";
 import type { AssistantMessage, CheckpointMessage, Message, Model } from "./llm.ts";
 import { ROOT } from "./manual.ts";
 import { apiKey, configPath, DEFAULT_BASE_MODEL, DEFAULT_STRONG_MODEL, defaultMediumModel, defaultStrongModel, keylessPresets, type Provider, providerModels, readyProviders, resolveProvider } from "./providers.ts";
+import { chatgptModels } from "./chatgpt.ts";
 import { cachedModels, catalogStale, fetchCatalog } from "./tarifas.ts";
 import { createSkillTool, loadSkills, type Skill, skillsSummary } from "./skills.ts";
 import { createVulndbTools } from "./vulndb.ts";
@@ -25,6 +26,7 @@ import { CveFeed, type CveFeedOptions } from "./cvefeed.ts";
 import { createShellTool, ShellPermissions, type ShellConfirmInfo } from "./shell.ts";
 import { createOrquestaTools, Orquesta } from "./orquesta.ts";
 import { sameScope, type Scope, scopeBrief, scopeChangeLine, scopeDiff, ScopeStore, scopeTag, scopeTagLabel, type ScopeTag } from "./scope.ts";
+import { bloqueReglas } from "./reglas-programa.ts";
 import { createReferenceTool } from "./referencia.ts";
 import { createDelegateTool, runSubagent } from "./subagent.ts";
 import { ContextDiet } from "./contexto.ts";
@@ -77,7 +79,8 @@ import { createMobileTools } from "./movil.ts";
 import { reaBloqueo, reaIncorporado, type ReaOpciones } from "./rea.ts";
 import { createFuzzTools, type FuzzEntorno, fuzzEntorno, type FuzzOpciones, HABILIDAD_FUZZ } from "./fuzzing.ts";
 import { generateReport, reportSavedLines } from "./report.ts";
-import { conContexto, Grafo } from "./grafo.ts";
+import { conContexto, contextoGrafo, Grafo } from "./grafo.ts";
+import { DetectorBucles, notaBucle, type ObservacionBucle, type ProgresoBucle } from "./automejora-bucles.ts";
 import { Alimentador } from "./grafo-alimentar.ts";
 import { bloqueCheckpoint, lineaFaltantes } from "./grafo-consultas.ts";
 import { createGrafoTools } from "./grafo-herramientas.ts";
@@ -126,7 +129,8 @@ En una evaluación el harness lleva la cobertura: hay categorías (coverage_view
 Profundizá antes de cambiar de tema: cuando un recurso acepta un id que no es tuyo, o rechaza su lectura pero existe, recorré las demás operaciones de esa familia con ese id (crear, convertir, mover, asignar, duplicar, cambiar estado, compartir) y mandá el id también en el cuerpo, no sólo en la ruta. Un 403 al leer no dice nada de las otras operaciones del mismo recurso. Pará cuando produzcas un cambio de estado comprobable o cuando se agoten esas operaciones.
 Si hay grafo, consultá grafo faltantes antes de elegir el próximo paso o cerrar; grafo hallazgo <id> antes de terminar un hallazgo para buscar eslabones, y grafo caminos cuando dos hechos podrían unirse.
 Si el objetivo es código y una hipótesis necesita un harness ejecutable (repositorio, C/C++, máquina virtual, intérprete, parser o protocolo), proponé en el cierre el modo investigación, el motivo y un tope sugerido. Con investigación automática activa en /config, podés abrirla con investigation_start; su tope es el menor entre USD 2 y la mitad del presupuesto restante. Sin ese ajuste, sólo el pedido citado del operador la abre.
-Un efecto vale más que una observación: preferí demostrar que una operación cambia datos que no te corresponden antes que sumar otra lectura o otro 500. Mientras quede presupuesto y haya una grieta abierta, seguí en esa grieta.
+Un efecto vale más que una observación: preferí demostrar que una operación cambia datos que no te corresponden antes que sumar otra lectura o otro 500. Mientras quede presupuesto y haya una grieta abierta dentro de las reglas del programa y del modelo de confianza, seguí en esa grieta.
+Una cadena que exige comprometer una parte que el programa da por honesta, o estar ya en la máquina de la víctima, no paga: cerrala.
 Una función que aparece en la interfaz web tiene casi siempre un endpoint de API equivalente, y las comprobaciones de permiso suelen estar en la interfaz y no en la API: cuando veas una función que tu cuenta no debería poder usar, buscá su endpoint y probala ahí, no sólo en la pantalla.
 Un desafío de autenticación se prueba aunque no tengas cuenta: mandá credenciales inventadas y sus casos límite (usuario inexistente, secreto vacío, otro algoritmo) y compará las respuestas. Que el servidor pida credenciales no significa que las compruebe bien.
 Si un recurso declara un estado que implica inmutabilidad (archivado, bloqueado, cerrado, congelado, cancelado, pagado, publicado), probá las escrituras que ese estado debería impedir: que la interfaz no las ofrezca no significa que la API las rechace.
@@ -304,6 +308,10 @@ export function findSession(db: DatabaseSync, which: string): string | undefined
 }
 
 export class Engine {
+  /** Un detector por bucle (principal, subagente, verificador, tramo de investigación); los más viejos se olvidan. */
+  private readonly detectoresBucles = new Map<string, DetectorBucles>();
+  /** Progreso acumulado en memoria; cada llamada lee sólo las filas posteriores a la última vista (por rowid). */
+  private readonly progresoBucles = { evento: 0, hallazgos: 0, nodo: 0, nodos: 0 };
   readonly db: DatabaseSync;
   readonly ledger: Ledger;
   readonly vault: Vault;
@@ -521,9 +529,6 @@ export class Engine {
     this.harvest.onReady = () => void this.catalog.load("ids_harvest");
     this.profile = new ProfileStore(this.db);
     this.consents = new ConsentStore(this.db);
-    // Una revocación de /datos de una versión anterior sigue valiendo: sin un modo elegido en esta máquina, «no».
-    const revocacion = respetarRevocacionAnterior(this.consents);
-    if (revocacion) { this.notices.push(revocacion); logEvent(this.db, this.sessionId, "trazas.modo", { modo: "no", por: "revocación anterior de /datos" }); }
     this.descartes = new DescartesDeTrazas(this.db, apiKey);
     // Los que quedaron pendientes de otra vez (sin servicio, o el proceso se cortó) salen ahora.
     if (this.descartes.pendientes().length) void this.descartes.enviar();
@@ -861,6 +866,7 @@ export class Engine {
         }
       }
     });
+    this.reconstruirBucles(messages);
     logEvent(this.db, this.sessionId, last ? "session.resumed" : "session.started", { model: modelLabel });
     // Una sesión retomada conserva el razonamiento que eligió el operador.
     const chosen = this.db.prepare("select payload from events where session_id=? and type='ajuste.razonamiento' order by seq desc limit 1").get(this.sessionId) as { payload: string } | undefined;
@@ -1054,8 +1060,58 @@ export class Engine {
     return {
       ...tool,
       // Lo que la herramienta deje en el grafo de hechos lleva su nombre (y el worker de afuera, si es un subagente).
-      execute: (args, signal) => conContexto({ herramienta: tool.name }, () => this.ejecutarAcotada(tool, args, signal)),
+      execute: async (args, signal) => {
+        let result: ToolResult;
+        try { result = await conContexto({ herramienta: tool.name }, () => this.ejecutarAcotada(tool, args, signal)); }
+        catch (error) {
+          const notes = this.notasBucles(tool.name, args, true, { resultado: (error as Error).message, pura: tool.pure });
+          if (notes.length) throw new Error(`${(error as Error).message}\n${notes.join("\n")}`, { cause: error });
+          throw error;
+        }
+        const notes = this.notasBucles(tool.name, args, result.isError === true, { resultado: result.text, pura: tool.pure });
+        return notes.length ? { ...result, text: `${result.text}\n${notes.join("\n")}`, details: { ...result.details, automejora: true } } : result;
+      },
     };
+  }
+
+  private notasBucles(nombre: string, args: unknown, isError: boolean, extra: ObservacionBucle): string[] {
+    const signals = this.detectorBucles().observar(nombre, args, this.progresoBucle(), isError, extra);
+    for (const signal of signals) logEvent(this.db, this.sessionId, "automejora.loop", signal);
+    return signals.map(notaBucle);
+  }
+
+  /** El worker sale del contexto que pone conWorker (subagentes, verificador, investigación); sin él, el bucle principal. */
+  private detectorBucles(worker = contextoGrafo.getStore()?.worker ?? "principal"): DetectorBucles {
+    const detector = this.detectoresBucles.get(worker) ?? new DetectorBucles();
+    this.detectoresBucles.delete(worker);
+    this.detectoresBucles.set(worker, detector);
+    if (this.detectoresBucles.size > 32) this.detectoresBucles.delete(this.detectoresBucles.keys().next().value!);
+    return detector;
+  }
+
+  private reconstruirBucles(messages: Message[]): void {
+    const calls = new Map<string, { name: string; args: unknown }>();
+    for (const message of messages) {
+      if (message.role === "assistant") for (const call of message.toolCalls) {
+        try { calls.set(call.id, { name: call.name, args: JSON.parse(call.arguments || "{}") }); } catch { /* una llamada malformada no tuvo argumentos ejecutables */ }
+      }
+      if (message.role !== "tool") continue;
+      const call = calls.get(message.toolCallId);
+      if (call) this.detectorBucles("principal").observar(call.name, call.args, { hallazgos: 0, cobertura: 0, nodos: 0 }, message.isError, { resultado: message.content, pura: this.agent.tools.find((tool) => tool.name === call.name)?.pure });
+    }
+    this.detectorBucles("principal").reiniciarRacha(this.progresoBucle());
+  }
+
+  /** Hallazgos cambiados y nodos nuevos de la sesión, sin recorrer events ni grafo_nodos: suma lo nuevo desde la última vez. */
+  private progresoBucle(): ProgresoBucle {
+    const p = this.progresoBucles;
+    const eventos = this.db.prepare("select max(seq) m, count(case when session_id=? and type='finding.changed' then 1 end) n from events where seq>?").get(this.sessionId, p.evento) as { m: number | null; n: number };
+    if (eventos.m !== null) { p.evento = eventos.m; p.hallazgos += eventos.n; }
+    if (this.grafo) {
+      const nodos = this.db.prepare("select max(id) m, count(case when sesion=? then 1 end) n from grafo_nodos where id>?").get(this.sessionId, p.nodo) as { m: number | null; n: number };
+      if (nodos.m !== null) { p.nodo = nodos.m; p.nodos += nodos.n; }
+    }
+    return { hallazgos: p.hallazgos, cobertura: this.coverage.marks(this.sessionId).size, nodos: p.nodos };
   }
 
   /** bounded sin el envoltorio: secretos, ejecución, grafo, filtro de texto dirigido al agente y recortes. */
@@ -1163,7 +1219,7 @@ export class Engine {
     }
     // Los mensajes del operador van textuales, nunca resumidos (src/instrucciones.ts).
     const operador = seccionDelOperador(this.db, this.sessionId, this.seqs[start]!, (texto) => this.artifacts.put(texto, "text/plain", "operador").hash);
-    const content = summary.content.trim() + (operador ? `\n\n${operador}` : "") + (grafoBloque ? `\n\n${grafoBloque}` : exchanges.length ? `\n\nINTERCAMBIOS HTTP (id → artefacto; usá el id como evidencia):\n${exchanges.join("\n")}` : "");
+    const content = summary.content.trim() + `\n\n${bloqueReglas(this.scope.current()?.reglas)}` + (operador ? `\n\n${operador}` : "") + (grafoBloque ? `\n\n${grafoBloque}` : exchanges.length ? `\n\nINTERCAMBIOS HTTP (id → artefacto; usá el id como evidencia):\n${exchanges.join("\n")}` : "");
     const checkpoint: CheckpointMessage = { role: "checkpoint", content, keepFrom: this.seqs[start]!, at: Date.now() };
     const tail = this.seqs.slice(start);
     messages.splice(0, start, checkpoint);
@@ -1727,8 +1783,15 @@ export class Engine {
         this.adoptRates();
       } catch { /* sin servicio: los que conoce el harness */ }
     }
-    const others = readyProviders().filter((id) => id !== model.provider);
-    return { current: `${model.provider}/${model.id}`, models: models.map((id) => `${model.provider}/${id}`), others, details };
+    const listed = models.map((id) => model.provider + "/" + id);
+    const chatgpt = await chatgptModels();
+    for (const item of chatgpt) {
+      const spec = "chatgpt/" + item.slug;
+      if (!listed.includes(spec)) listed.push(spec);
+      details[spec] = { name: item.name, kind: "Using ChatGPT plan" };
+    }
+    const others = readyProviders().filter((id) => id !== model.provider && !(id === "chatgpt" && chatgpt.length));
+    return { current: model.provider + "/" + model.id, models: listed, others, details };
   }
 
   /** Registra las respuestas incoherentes seguidas; el cambio de modelo, si hace falta, lo hace fallbackOnFailure. */
@@ -1749,12 +1812,13 @@ export class Engine {
    * /modelo. Sin saldo no se cambia: eso corta el turno (ver transportFor).
    */
   private async fallbackOnFailure(reply: AssistantMessage): Promise<string | undefined> {
-    if (reply.exhausted || this.exhausted || this.agent.model.provider === "faux") return undefined;
+    // Una falla del plan no debe iniciar una solicitud facturable con otro proveedor.
+    if (reply.exhausted || this.exhausted || this.agent.model.provider === "faux" || this.agent.model.provider === "chatgpt") return undefined;
     const from = `${this.agent.model.provider}/${this.agent.model.id}`;
     let to: string | undefined;
     try {
       const { current, models, details } = await this.availableModels();
-      to = fallbackModel(current, models, (spec) => Number(details[spec]?.price?.split("/")[0]) || undefined);
+      to = fallbackModel(current, models.filter((spec) => !spec.startsWith("chatgpt/")), (spec) => Number(details[spec]?.price?.split("/")[0]) || undefined);
       if (!to) return undefined;
       this.applyModel(to);
     } catch {
@@ -2015,6 +2079,10 @@ export class Engine {
    * historial. Si la sesión recién empieza o el ejecutor no lo escribe bien, lo arma el harness.
    */
   private async writeHandoff(encargo: Encargo, signal: AbortSignal): Promise<{ texto: string; tokens: number; mecanico: boolean }> {
+    const conReglas = (texto: string, mecanico: boolean) => {
+      const completo = `${texto}\n\n${bloqueReglas(this.scope.current()?.reglas)}`;
+      return { texto: completo, tokens: Math.ceil(completo.length / 4), mecanico };
+    };
     if (this.contextTokens() >= TRASPASO_MIN_TOKENS) {
       const reply = await this.tagged("traspaso")({
         model: this.agent.model,
@@ -2025,16 +2093,16 @@ export class Engine {
       });
       this.ledger.record(reply, { sessionId: this.sessionId, account: this.provider.account, worker: "traspaso", model: this.agent.model });
       const texto = reply.content.trim();
-      if (reply.stopReason === "stop" && !reply.toolCalls.length && texto && !readRefusal(reply)) return { texto, tokens: Math.ceil(texto.length / 4), mecanico: false };
+      if (reply.stopReason === "stop" && !reply.toolCalls.length && texto && !readRefusal(reply)) return conReglas(texto, false);
     }
     const texto = traspasoMecanico({
       pedido: this.operatorTexts().at(-1),
-      alcance: scopeBrief(this.scope.current()),
+      alcance: scopeBrief(this.scope.current(), false),
       hallazgos: this.findings.list({ sessionId: this.sessionId }).filter((item) => item.state !== "descartado").map((item) => `${item.id.slice(0, 8)} ${item.state} «${item.title}»`),
       pasos: pasosVistos(this.agent.messages.slice(-24)),
       encargo,
     });
-    return { texto, tokens: Math.ceil(texto.length / 4), mecanico: true };
+    return conReglas(texto, true);
   }
 
   /** Corre un encargo con un modelo: una consulta sin herramientas, o un tramo con su propio historial. */
@@ -2599,8 +2667,8 @@ export function pickModel(wanted: string, models: string[], current: string, pro
   const how = `Valen: ${valid.map((id) => (id === "orobas" ? "orobas (la suscripción)" : id)).join(", ")}${names.length ? `. Con ${provider} alcanza el nombre del modelo: ${names.join(", ")}` : ""}. Otro proveedor se escribe proveedor/modelo y antes se declara, con su clave, en la configuración (config.json).`;
   if (text.includes("/")) {
     const asked = text.slice(0, text.indexOf("/"));
-    const sameProvider = asked === provider;
-    if (sameProvider && models.length && !models.includes(text)) throw new Error(`Tu cuenta no tiene «${text}». Disponibles: ${names.join(", ")}.`);
+    const same = models.filter((item) => item.startsWith(asked + "/"));
+    if (same.length && !models.includes(text)) throw new Error("Tu cuenta no tiene «" + text + "». Disponibles: " + same.map((item) => item.slice(asked.length + 1)).join(", ") + ".");
     // Uno de fábrica sin clave (Ollama local) se puede elegir como en main, aunque no se liste entre los que valen.
     if (providers && !valid.includes(asked) && !keylessPresets().includes(asked)) throw new Error(`«${asked}» no es un proveedor que puedas usar. ${how}`);
     return text;
@@ -2609,7 +2677,7 @@ export function pickModel(wanted: string, models: string[], current: string, pro
   const matches = exact ? [exact] : names.filter((name) => name.startsWith(text) || name.includes(text));
   if (!matches.length) throw new Error(`No hay un modelo «${wanted.trim()}». Disponibles: ${names.join(", ")}.${providers ? ` Otro proveedor se escribe proveedor/modelo (${valid.join(", ")}).` : ""}`);
   const chosen = [...matches].sort((a, b) => a.length - b.length)[0]!;
-  return `${provider}/${chosen}`;
+  return models[names.indexOf(chosen)] ?? provider + "/" + chosen;
 }
 
 /** Pasos del bucle (llamadas, resultados y texto de cada respuesta del modelo), en orden: lo que mira el router. */

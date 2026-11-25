@@ -1,10 +1,9 @@
 # Elevate AI Cyber con su caja de herramientas y Chromium. Construir desde la raíz del repo:
-#   docker build -f distro/Dockerfile -t elevate-cyber .
-# Publicar para amd64 y arm64 (Mac con Apple Silicon sin emulación), y después fijar su digest en
-# distro/imagen-release.txt para el próximo release (docs/releases.md):
-#   docker buildx build --platform linux/amd64,linux/arm64 -f distro/Dockerfile -t ghcr.io/leandrozz/elevate-cyber:latest --push .
+#   docker build -f distro/Dockerfile -t orobas-sec .
+# La imagen de los releases (ghcr.io/leandrozz/orobas-sec, pública) la arma y publica, para amd64 y arm64, el workflow
+# de release (.github/workflows/release.yml), que fija su digest en los lanzadores del release (docs/releases.md).
 # Correr sobre una carpeta de proyecto (ahí quedan sesiones, hallazgos y artefactos):
-#   docker run -it --rm -e OROBAS_API_KEY -v "$PWD:/proyecto" elevate-cyber
+#   docker run -it --rm -e OROBAS_API_KEY -v "$PWD:/proyecto" orobas-sec
 # Base fijada por digest (el índice multiplataforma de node:26.13.1-bookworm-slim): el tag es sólo para leerlo.
 # Para subirla: docs/releases.md, «Imagen».
 FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1
@@ -115,4 +114,8 @@ ENV CYBER_PLAYWRIGHT=/opt/cyber-browser/node_modules/playwright/index.mjs CYBER_
     CYBER_CONFIG_BASE=/opt/elevate-cyber/distro/config.ejemplo.json XDG_CONFIG_HOME=/home/node/.config \
     CYBER_PLATAFORMAS_HOME=/home/node/.config/elevate-cyber/plataformas CYBER_DATA_DIR=/home/node/.local/share/elevate-cyber HOME=/home/node
 VOLUME ["/proyecto"]
+# Sin telemetría ni chequeos de versión de las herramientas de la imagen (las mismas variables que pone el agente en
+# cada proceso hijo, src/exec.ts SIN_TELEMETRIA; sirven también para lo que se corra a mano en el contenedor).
+ENV DO_NOT_TRACK=1 SEMGREP_SEND_METRICS=off SEMGREP_ENABLE_VERSION_CHECK=0 NO_UPDATE_NOTIFIER=1 \
+  NPM_CONFIG_UPDATE_NOTIFIER=false NEXT_TELEMETRY_DISABLED=1
 ENTRYPOINT ["/opt/elevate-cyber/bin/cyber", "-C", "/proyecto"]

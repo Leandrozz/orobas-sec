@@ -11,4 +11,5 @@ Referencia de la herramienta tal como está hoy; se verifica contra el código.
 | [desarrollo.md](desarrollo.md) | Para quien contribuye: requisitos, pruebas, mapa de carpetas, imagen Docker, estilo de commits. |
 | [releases.md](releases.md) | Instalación verificable: qué trae y cómo se firma un release, cómo verificarlo a mano, la clave, y las versiones fijadas de la imagen. |
 | [ci.md](ci.md) | Integración continua: `cyber ci`, la GitHub Action, GitLab y la imagen genérica; referencia de `.orobas/ci.yml`, códigos de salida, salidas, línea de base y modelo de amenaza. |
+| [benchmark.md](benchmark.md) | El banco de ocho CVE reales: qué mide, cómo correrlo con tu Docker, cuánto tarda y cómo leer la tarjeta. |
 | [../CHANGELOG.md](../CHANGELOG.md) | Qué cambió en cada versión. |

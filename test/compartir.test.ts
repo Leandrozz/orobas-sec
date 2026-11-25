@@ -44,7 +44,8 @@ test("datos: el modo se elige, «subir» manda las sesiones anteriores anónimas
     await until(() => !host.engine.agent.running && host.engine.agent.messages.length >= 2);
 
     const status = await client.ask("datos", { action: "status" });
-    assert.match(status[0]!, /elegido: compartir \(por defecto\)\. Rige: compartir/);
+    assert.match(status[0]!, /elegido: no \(por defecto\)\. Rige: no/);
+    assert.ok(!received.some((r) => r.path === "/trayectorias" || r.path === "/consent"), "sin elegir nada, no sale ni trayectoria ni consentimiento");
 
     // En «local» no se sube nada, ni a pedido.
     assert.match((await client.ask("datos", { action: "modo", value: "local" }))[0]!, /Trazas: «local»/);

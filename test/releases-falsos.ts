@@ -45,7 +45,7 @@ const SIN_RED = { ...process.env, npm_config_offline: "true", npm_config_update_
 /** Un repositorio con lo que armar.sh necesita: instaladores, lanzadores y scripts reales; la clave de prueba puesta con fijar-clave.sh. */
 export function repoFalso(base: string, clave: Clave, imagen?: string): string {
   const repo = join(base, "repo");
-  for (const f of ["install.sh", "install.ps1", "distro/lanzador/cyber", "distro/lanzador/cyber.ps1", "scripts/release/armar.sh", "scripts/release/fijar-clave.sh"]) {
+  for (const f of ["install.sh", "install.ps1", "distro/lanzador/cyber", "distro/lanzador/cyber.ps1", "distro/lanzador/cyber.cmd", "scripts/release/armar.sh", "scripts/release/fijar-clave.sh"]) {
     mkdirSync(dirname(join(repo, f)), { recursive: true });
     copyFileSync(join(RAIZ, f), join(repo, f));
   }

@@ -12,7 +12,7 @@ import { etiquetarHallazgo } from "./vistas.ts";
 import { TIPOS, type Pestana, type Tipo, type Vista } from "./pestanas.ts";
 import { cantidad, FORMAS, type Forma } from "./ventanas.ts";
 import { PROFILES } from "../perfil.ts";
-import { accountMenu, mailMenu, platformMenu } from "../menu.ts";
+import { accountMenu, chatgptMenu, mailMenu, platformMenu } from "../menu.ts";
 import { SHARE_SENTENCE } from "../trayectorias.ts";
 import { decodeRows, relative } from "../sesiones.ts";
 
@@ -388,6 +388,7 @@ function settings(): Setting[] {
     viaCommand("User-Agent", "agente", async (io) => /User-Agent: (.+?)\. Uso/.exec(await first(io, "agent"))?.[1] ?? "—"),
     viaCommand(t("Permisos de shell", "Shell permissions"), "permisos", async (io) => { const lines = await io.ask("permisos", {}); if (lines.some((line) => line.startsWith("Modo: autoaprobar todo"))) return t("Todo autoaprobado", "Everything auto-approved"); const saved = lines.filter((line) => line.startsWith("permitido siempre")).length; return saved ? t(`${saved} guardado${saved > 1 ? "s" : ""}`, `${saved} saved`) : t("Ninguno; cada comando pregunta", "None; every command asks"); }),
     viaCommand(t("Cuenta de orobas", "orobas account"), "orobas", (io) => first(io, "account", { service: "orobas", action: "status" })),
+    viaCommand("ChatGPT", "chatgpt", (io) => first(io, "chatgpt", { action: "status" })),
     viaCommand("HackerOne", "hackerone", (io) => first(io, "account", { service: "hackerone", action: "status" })),
     fixed(t("Navegador del operador", "Operator browser"), "navegador", browserOptions),
     viaCommand(t("Correo de prueba", "Test mail"), "correo", async (io) => { const boxes = await io.ask("mail_account", { action: "status" }); return /sin vincular|not linked/.test(boxes[0] ?? "") ? t("Sin vincular", "Not linked") : t(`${boxes.length} casilla${boxes.length > 1 ? "s" : ""}`, `${boxes.length} mailbox(es)`); }),
@@ -861,6 +862,7 @@ export function buildCommands(): CommandSpec[] {
       if (choice === undefined) return null;
       return fromLines(title, await io.view("informe", choice === 1 ? "en" : ""), { tone: "ok" });
     } },
+    { name: "mejoras", description: "Diagnosticar fallas de las últimas sesiones desde trazas locales y la base del proyecto", usage: "[N] [modelo]", run: (io, arg) => panelOf("mejoras", () => io.view("mejoras", arg))() },
     { name: "datos", aliases: ["data", "trazas", "traces"], description: "Trazas: compartirlas con Elevate AI, guardarlas sólo en tu PC o no guardarlas; ver qué incluyen y dónde quedan", usage: "[compartir | local | no | subir]", run: async (io, arg) => {
       const title = t("trazas", "traces");
       const pedido = arg.trim().toLowerCase();
@@ -897,7 +899,7 @@ export function buildCommands(): CommandSpec[] {
       if (!(await io.confirm(t("¿Verificar todos los candidatos pendientes? Usa el modelo y tarda.", "Verify every pending candidate? It uses the model and takes a while.")))) return null;
       return fromLines(title, await io.ask("verify", { value: "todos" }));
     } },
-    { name: "alcance", aliases: ["scope"], description: "Alcance de la sesión y cabeceras fijas del proyecto", usage: "[add|excluir|quitar|referencia <reglas>|limpiar|recuperar <rev>|sesiones|cabecera Nombre: valor|cabecera quitar Nombre]", run: scopeCommand },
+    { name: "alcance", aliases: ["scope"], description: "Alcance, reglas del programa y cabeceras fijas", usage: "[add|excluir|quitar|referencia <reglas>|reglas [exclusion|honesto|atacante] <cita>|limpiar|recuperar <rev>|sesiones|cabecera Nombre: valor]", run: scopeCommand },
     { name: "h1", description: "HackerOne: programas, o alcance de un programa", usage: "[programas | alcance <programa>]", run: async (io, arg) => {
       const title = "HackerOne";
       if (arg) { const [action, handle] = arg.split(/\s+/); return fromLines(title, await io.ask("h1", { action, handle })); }
@@ -909,6 +911,7 @@ export function buildCommands(): CommandSpec[] {
       return fromLines(title, await io.ask("h1", { action: "alcance", handle }));
     } },
     { name: "orobas", description: "Clave de orobas: iniciar sesión, actualizar o revocar", run: async (io) => fromLines("orobas", await accountMenu("orobas", menuIO(io))) },
+    { name: "chatgpt", description: "Using ChatGPT plan: estado, cuentas, entrar o salir · Manage usage", run: async (io) => fromLines("ChatGPT", await chatgptMenu(chatgptIO(io))) },
     { name: "hackerone", description: "Cuenta de HackerOne: iniciar sesión, actualizar o revocar", run: async (io) => fromLines("HackerOne", await accountMenu("hackerone", menuIO(io))) },
     { name: "correo", aliases: ["mail"], description: "Casillas de correo de prueba: agregar o quitar", run: async (io) => fromLines(t("correo de prueba", "test mail"), await mailMenu(menuIO(io))) },
     { name: "navegador", aliases: ["browser", "chrome"], description: t("Tu navegador (extensión de Orobas): ver si está conectado, y autorizarlo o revocarlo en este proyecto", "Your browser (Orobas extension): see whether it is connected, and allow or revoke it in this project"), usage: "si | no", run: async (io, arg) => fromLines(t("navegador", "browser"), await io.ask("navegador", arg.trim() ? { value: arg.trim() } : {}), arg.trim() ? { tone: "ok" } : {}) },
@@ -948,12 +951,12 @@ export function buildCommands(): CommandSpec[] {
 }
 
 /** Los comandos que muestra la lista de /, en este orden; el resto vive en un grupo o está oculto. */
-export const VISIBLES = ["sesiones", "hallazgos", "informe", "alcance", "limites", "modelo", "razonamiento", "ultra", "conexiones", "herramientas", "diseño", "config", "inicio", "novedades", "ayuda", "streamer", "limpiar", "salir"];
+export const VISIBLES = ["sesiones", "hallazgos", "informe", "mejoras", "alcance", "limites", "modelo", "razonamiento", "ultra", "conexiones", "herramientas", "diseño", "config", "inicio", "novedades", "ayuda", "streamer", "limpiar", "salir"];
 
 const PADRE: Record<string, string[]> = {
   sesiones: ["jobs", "continuar"], modelo: ["router"], hallazgos: ["verificar", "verificacion", "evidence", "cobertura", "grafo", "cves", "memory"], informe: ["trayectorias", "datos"],
   alcance: ["senuelos", "identity", "consent", "permisos", "agente", "deteccion"], limites: ["presupuesto", "peticiones", "ritmo", "costos"],
-  conexiones: [...PLATFORM_NAMES, "orobas", "hackerone", "h1", "correo", "navegador"], herramientas: ["perfil", "escaneres", "mcp"], diseño: ["ventanas", "pestañas", "tema"], config: ["idioma", "investigacion-auto"],
+  conexiones: [...PLATFORM_NAMES, "orobas", "chatgpt", "hackerone", "h1", "correo", "navegador"], herramientas: ["perfil", "escaneres", "mcp"], diseño: ["ventanas", "pestañas", "tema"], config: ["idioma", "investigacion-auto"],
 };
 const CASA: Record<string, string> = { hallazgos: t("Lista de hallazgos", "Findings list"), informe: t("Generar el informe", "Generate the report"), alcance: t("Ver y editar el alcance", "View and edit the scope"), herramientas: t("Qué hay instalado", "What's installed") };
 
@@ -988,6 +991,11 @@ export const menuIO = (io: CommandIO) => ({
   pick: (title: string, options: string[]) => io.pick(title, options),
   askHidden: (label: string) => io.input(label, { hidden: true }),
   notice: (lines: string[]) => io.notice?.({ title: "orobas", lines, footer: t("esperando tu aprobación en el sitio · Esc cancela", "waiting for your approval on the site · Esc cancels") }),
+});
+
+const chatgptIO = (io: CommandIO) => ({
+  ...menuIO(io),
+  notice: (lines: string[], waiting?: boolean) => io.notice?.({ title: "ChatGPT", lines, ...(waiting ? { footer: "Esperando el navegador · Esc cancela" } : { tone: "warn" as const }) }),
 });
 
 export function helpPanel(keys: string[]): Panel {

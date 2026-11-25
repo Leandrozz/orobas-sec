@@ -4,18 +4,21 @@
 #                              para el modo nativo; adentro, VERSION con el tag
 #   install.sh, install.ps1    los instaladores, con la versión (y el repositorio, con --repo) puestos
 #   cyber-lanzador.sh/.ps1     los lanzadores del modo contenedor, con la versión y la imagen fijada por digest
-#                              (distro/imagen-release.txt); si ese archivo no fija una imagen, el release sale
-#                              sin modo contenedor (sin lanzadores): nunca con una imagen «latest»
+#   cyber.cmd                  (--imagen, o si no distro/imagen-release.txt), y el cyber.cmd que llama al de Windows;
+#                              sin una imagen fijada el release sale sin modo contenedor (sin lanzadores): nunca con
+#                              una imagen «latest»
 #   SHA256SUMS                 la suma de cada uno. La firma (SHA256SUMS.sig) la agrega el workflow de release.
 #
-#   scripts/release/armar.sh vX.Y.Z SALIDA [--repo DUEÑO/REPO] [--revision COMMIT]
+#   scripts/release/armar.sh vX.Y.Z SALIDA [--repo DUEÑO/REPO] [--revision COMMIT] [--imagen REPOSITORIO@sha256:DIGEST]
 #
+# --imagen es la que acaba de publicar el workflow de release (su digest de arriba del índice multiplataforma): así el
+# release fija la imagen que se armó de ese mismo commit, sin un commit a mano entre medio. Mal escrita, frena.
 # El contenido sale del commit (HEAD por defecto) con git archive: nada sin trackear. Necesita git, node/npm,
 # GNU tar y sha256sum (los runners Linux de GitHub los tienen). El paquete es reproducible: mismas fechas,
 # dueños y orden en el tar, y gzip sin nombre ni hora.
 set -eu
 
-uso() { echo 'Uso: scripts/release/armar.sh vX.Y.Z SALIDA [--repo DUEÑO/REPO] [--revision COMMIT]' >&2; exit 2; }
+uso() { echo 'Uso: scripts/release/armar.sh vX.Y.Z SALIDA [--repo DUEÑO/REPO] [--revision COMMIT] [--imagen REPOSITORIO@sha256:DIGEST]' >&2; exit 2; }
 morir() { printf 'armar.sh: %s\n' "$*" >&2; exit 1; }
 
 [ $# -ge 2 ] || uso
@@ -24,10 +27,13 @@ SALIDA=$2
 shift 2
 REPO=
 REVISION=HEAD
+IMAGEN_ARG=
+CON_IMAGEN=
 while [ $# -gt 0 ]; do
   case $1 in
     --repo) [ $# -ge 2 ] || uso; REPO=$2; shift 2 ;;
     --revision) [ $# -ge 2 ] || uso; REVISION=$2; shift 2 ;;
+    --imagen) [ $# -ge 2 ] || uso; IMAGEN_ARG=$2; CON_IMAGEN=1; shift 2 ;;
     *) uso ;;
   esac
 done
@@ -70,10 +76,17 @@ for c in "$(clave_sh "$A/distro/lanzador/cyber")" "$(clave_ps "$A/install.ps1")"
 done
 case $CLAVE in *REEMPLAZAR*) echo "armar.sh: aviso: la clave pública es el marcador (copia de desarrollo); los instaladores de este release no van a verificar nada." >&2 ;; esac
 
-# Imagen del modo contenedor: sólo fijada por digest.
-IMAGEN=$(sed -n '/^[[:space:]]*#/d; /^[[:space:]]*$/d; p' "$A/distro/imagen-release.txt" 2>/dev/null | head -n 1 | tr -d '[:space:]')
-if printf '%s\n' "$IMAGEN" | grep -Eq '^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$'; then
+# Imagen del modo contenedor: sólo fijada por digest. --imagen gana sobre distro/imagen-release.txt.
+POR_DIGEST='^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$'
+if [ -n "$CON_IMAGEN" ]; then
+  printf '%s\n' "$IMAGEN_ARG" | grep -Eq "$POR_DIGEST" || morir "--imagen inválida: «$IMAGEN_ARG» (REPOSITORIO@sha256:DIGEST)"
+  IMAGEN=$IMAGEN_ARG
+else
+  IMAGEN=$(sed -n '/^[[:space:]]*#/d; /^[[:space:]]*$/d; p' "$A/distro/imagen-release.txt" 2>/dev/null | head -n 1 | tr -d '[:space:]')
+fi
+if printf '%s\n' "$IMAGEN" | grep -Eq "$POR_DIGEST"; then
   CONTENEDOR=1
+  [ -f "$A/distro/lanzador/cyber.cmd" ] || morir "falta distro/lanzador/cyber.cmd en $COMMIT"
 else
   CONTENEDOR=
   echo "armar.sh: aviso: distro/imagen-release.txt no fija una imagen por digest: el release sale sin modo contenedor (sin lanzadores)." >&2
@@ -117,6 +130,7 @@ cp "$A/install.sh" "$A/install.ps1" "$SALIDA/"
 if [ -n "$CONTENEDOR" ]; then
   cp "$A/distro/lanzador/cyber" "$SALIDA/cyber-lanzador.sh"
   cp "$A/distro/lanzador/cyber.ps1" "$SALIDA/cyber-lanzador.ps1"
+  cp "$A/distro/lanzador/cyber.cmd" "$SALIDA/cyber.cmd"
 fi
 chmod 644 "$SALIDA"/*
 # sha256sum marca el modo con un caracter: ' ' (texto) en Linux, '*' (binario) en Windows/MSYS; se normaliza a ' '.
@@ -125,5 +139,5 @@ mv "$TRABAJO/SHA256SUMS" "$SALIDA/SHA256SUMS"
 
 echo "Release $VERSION de ${COMMIT%"${COMMIT#????????????}"} en $SALIDA:"
 (cd "$SALIDA" && cat SHA256SUMS)
-[ -n "$CONTENEDOR" ] && echo "Imagen fijada: $IMAGEN" || echo 'Sin modo contenedor (distro/imagen-release.txt no fija una imagen).'
+[ -n "$CONTENEDOR" ] && echo "Imagen fijada: $IMAGEN" || echo 'Sin modo contenedor (ni --imagen ni distro/imagen-release.txt fijan una imagen).'
 echo 'Falta firmar SHA256SUMS (lo hace el workflow de release): ssh-keygen -Y sign -n orobas-sec-release -f CLAVE SHA256SUMS'

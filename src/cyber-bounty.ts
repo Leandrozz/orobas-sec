@@ -5,6 +5,7 @@ import { orobasBaseUrl } from "./providers.ts";
 import { readSecret, writeSecret, deleteSecret } from "./secretos.ts";
 import { parseRule, type ScopeRule } from "./scope.ts";
 import { avisoDeCabeceras, textoDePolitica } from "./politica-cabeceras.ts";
+import { extraerReglas } from "./reglas-programa.ts";
 import { ReportRedactor } from "./redact.ts";
 import type { Finding } from "./findings.ts";
 
@@ -72,7 +73,7 @@ export function bountyScope(program: BountyProgram) {
     `Autorización: ${JSON.stringify(program.authorization ?? null).slice(0, 2000)}`,
     `Conducta: máximo ${c.max_requests_per_second} peticiones/s; acciones destructivas: ${c.destructive_actions ? "permitidas" : "prohibidas"}; cabecera del agente: ${textoDePolitica(c.agent_header)}; ventana: ${c.test_window}. Aplicá estas restricciones también en herramientas externas; no reemplazan límites más estrictos del operador.`,
   ].filter(Boolean).join("\n");
-  return { include, exclude, skipped, notes };
+  return { include, exclude, skipped, notes, reglas: extraerReglas([{ texto: program.policy, fuente: `Cyber Bounty ${program.id}, política` }]) };
 }
 
 export function bountyDraft(finding: Omit<Finding, "cvss"> & { cwe?: string; cvss?: string | number }, read: (hash: string) => Buffer, redactor: ReportRedactor) {

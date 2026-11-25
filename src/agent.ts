@@ -221,7 +221,9 @@ function stepSignature(calls: ToolCall[], results: ToolMessage[]): { calls: stri
   };
   return {
     calls: calls.map(normalize).sort().join("|"),
-    outcome: results.map((result) => `${result.isError ? "E" : "R"}:${result.content.slice(0, 2000)}`).sort().join("|"),
+    // La nota de automejora acompaña al resultado para orientar al modelo, pero no cambia el resultado
+    // de la herramienta a los ojos del detector de estancamiento ya existente.
+    outcome: results.map((result) => `${result.isError ? "E" : "R"}:${result.content.split("\n[sistema][automejora]")[0]!.slice(0, 2000)}`).sort().join("|"),
     allErrors: results.length > 0 && results.every((result) => result.isError),
     allRepeated: results.length > 0 && results.every((result) => result.content.startsWith("Llamada idéntica")),
   };

@@ -4,6 +4,16 @@ Esta tabla sale de leer `src/`, `bin/` y `distro/lanzador/`. Con el lanzador de 
 
 El archivo de configuración de proveedores (`config.json`) no es una variable: su ruta sí (`CYBER_CONFIG`). Dentro de él van `defaultModel` (el modelo base, el del bucle del agente), `strongModel` (el modelo fuerte, el que consultan `deep_reason` y `delegate` con `strong`), `providers` (con `baseUrl`, `apiKeyEnv` y `models` con sus tarifas; un modelo puede llevar `idleTimeoutMs` para tolerar más silencio), `mcp` (servidores MCP por stdio) y `playwright` (dónde está Playwright; ver `CYBER_PLAYWRIGHT`).
 
+## Usar tu plan de ChatGPT
+
+orobas-sec admite **Sign in with ChatGPT** para la edición de código abierto que corre en tu máquina. Necesitás una cuenta elegible de ChatGPT Plus o Pro. Ejecutá `cyber login chatgpt` o abrí `/chatgpt` en la TUI, elegí **Continue with ChatGPT** y autorizá la app en el navegador. Si no se abre, copiá la URL que muestra la terminal. El callback escucha en `127.0.0.1`; en Docker usa el puerto que publica el lanzador junto al puente del navegador. Si Docker corre en una máquina remota, reenviá ese puerto a la máquina del navegador antes de autorizar.
+
+El ingreso usa registro dinámico de OpenAI, PKCE, un estado y un nonce nuevos para cada intento. El identificador del cliente y los tokens quedan cifrados en el almacén de secretos de orobas-sec. Para esto hace falta el llavero del sistema o `CYBER_SECRETS_KEY`; la sesión no se guarda en texto plano. No toma credenciales de otras aplicaciones. `cyber logout chatgpt` intenta revocar el refresh token y borra los tokens locales; conserva el registro del cliente para volver a ingresar.
+
+Después de entrar, elegí un modelo de la lista con `/modelo` o indicá `-m chatgpt/<modelo>`. El catálogo proviene de `GET /v1/models` con tu sesión. El uso del plan se administra en [Manage usage](https://chatgpt.com/settings/usage). Si no concediste `chatgpt.tokens.use.direct`, entrá de nuevo y habilitá el permiso; también podés usar otro proveedor ya configurado.
+
+En pruebas locales solamente, `CHATGPT_AUTH_URL` y `CHATGPT_BASE_URL` apuntan el OAuth y Responses a servidores simulados. No son necesarios para el uso normal.
+
 ## Modelo y proveedores
 
 | Variable | Qué hace | Por defecto |
@@ -70,7 +80,7 @@ Para no tocar la shell, Playwright también se señala en `config.json` con la m
 
 | Variable | Qué hace |
 | --- | --- |
-| `CYBER_TRAZAS` | Modo de trazas: `compartir` (por defecto), `local` o `no`. Las trazas son todo el material de entrenamiento: cada pedido al modelo y su respuesta, el registro de cada turno, la trayectoria de cada sesión y la cita de los consentimientos. Con `compartir` van al servicio orobas, con los secretos tapados (sólo de las sesiones con el proveedor orobas). Con `local` no sale contenido al servicio y el material queda en JSONL en `…/elevate-cyber/proyectos/<id>/trazas` (formato en su `LEEME.md`). Con `no` no sale contenido ni se arma material. Siguen valiendo `0`, `false`, `off` y `cantidades` como `no`; un valor desconocido también es `no`. Manda sobre `"trazas"` de `config.json`, que se cambia con `/datos` o `/config`. El servicio aplica el más restrictivo entre éste y el de la cuenta (cyber.elevateai.ar/cuenta/trazas), y el agente también. Los lanzadores de Docker la pasan al contenedor al crearlo. |
+| `CYBER_TRAZAS` | Modo de trazas: `no` (por defecto: no se guarda ni se comparte nada), `local` o `compartir`. Las trazas son todo el material de entrenamiento: cada pedido al modelo y su respuesta, el registro de cada turno, la trayectoria de cada sesión y la cita de los consentimientos. Con `compartir` van al servicio orobas, con los secretos tapados (sólo de las sesiones con el proveedor orobas). Con `local` no sale contenido al servicio y el material queda en JSONL en `…/elevate-cyber/proyectos/<id>/trazas` (formato en su `LEEME.md`). Con `no` no sale contenido ni se arma material. Siguen valiendo `0`, `false`, `off` y `cantidades` como `no`; un valor desconocido también es `no`. Manda sobre `"trazas"` de `config.json`, que se cambia con `/datos` o `/config`. El servicio aplica el más restrictivo entre éste y el de la cuenta (cyber.elevateai.ar/cuenta/trazas), y el agente también. Los lanzadores de Docker la pasan al contenedor al crearlo. |
 
 ## Lanzador de Docker (`distro/lanzador/`)
 
@@ -78,8 +88,8 @@ Las leen `cyber` (sh) y `cyber.ps1`. Con `OROBAS_API_KEY` definida en tu shell, 
 
 | Variable | Qué hace | Por defecto |
 | --- | --- | --- |
-| `CYBER_IMAGE` | Imagen a correr. | la que fija el release, por digest; en una copia de desarrollo del lanzador, `ghcr.io/leandrozz/elevate-cyber:latest` |
-| `CYBER_NO_UPDATE` | Si tiene valor, no busca imagen nueva al arrancar. | sin definir: busca |
+| `CYBER_IMAGE` | Imagen a correr. | la que fija el release, por digest; en una copia de desarrollo del lanzador, `ghcr.io/leandrozz/orobas-sec:latest` |
+| `CYBER_NO_UPDATE` | Si tiene valor, el lanzador no consulta nada al arrancar: ni imagen nueva ni el último release de GitHub (que con una imagen fijada mira una vez por día, sólo con terminal y sin mandar datos). | sin definir: busca |
 | `CYBER_PRUEBA_WT` | Solo para pruebas del lanzador de Windows: un número de build (por ejemplo `19041`) que habilita el paso a Windows Terminal fuera de Windows y con la entrada redirigida. | sin definir |
 | `CYBER_RELEASES_URL` | De dónde bajan los releases `cyber --actualizar` y los instaladores (un espejo, o pruebas en `http://127.0.0.1`). La seguridad no depende de la URL sino de la firma: sólo se acepta lo firmado con la clave que trae el lanzador. | `https://github.com/Leandrozz/orobas-sec/releases` |
 | `CYBER_CERRAR_DOCKER` | `0` o `1`: si cerrar Docker Desktop al salir cuando lo abrió el lanzador. Gana sobre `cyber --cerrar-docker si\|no` para esa corrida. | `cyber --cerrar-docker`; si no se fijó, sí cierra |

@@ -46,8 +46,12 @@ export function avisoTrazasPrimeraVez(dir: string): string | undefined {
     writeFileSync(marca, `${JSON.stringify({ at: new Date().toISOString(), modo: rige })}\n`);
   } catch { /* sin marca se vuelve a avisar: mejor de más que de menos */ }
   if (rige === "compartir") return t(
-    `Compartir trazas viene activado. Con los modelos de la suscripción, el material de tus sesiones (pedidos al modelo y respuestas, turnos, trayectorias y la cita de tus consentimientos) se guarda en Elevate AI para evaluar y entrenar el agente. Puede traer datos de los sistemas que probás. Antes de salir, el agente tapa las credenciales y secretos que reconoce. Cambialo cuando quieras: /datos local (queda sólo en tu PC), /datos no, CYBER_TRAZAS=local|no, o cyber.elevateai.ar/cuenta/trazas.`,
-    `Sharing traces is on. With subscription models, your sessions' material (model requests and answers, turns, trajectories and the quote of your consents) is stored at Elevate AI to evaluate and train the agent. It can include data from the systems you test. Before it leaves, the agent masks the credentials and secrets it recognizes. Change it any time: /datos local (kept only on your PC), /datos no, CYBER_TRAZAS=local|no, or cyber.elevateai.ar/cuenta/trazas.`,
+    `Compartís trazas: con los modelos de la suscripción, el material de tus sesiones (pedidos al modelo y respuestas, turnos, trayectorias y la cita de tus consentimientos) se guarda en Elevate AI para evaluar y entrenar el agente. Puede traer datos de los sistemas que probás. Antes de salir, el agente tapa las credenciales y secretos que reconoce. Para dejar de compartir: /datos no (o /datos local para guardarlas sólo en tu PC).`,
+    `You share traces: with subscription models, your sessions' material (model requests and answers, turns, trajectories and the quote of your consents) is stored at Elevate AI to evaluate and train the agent. It can include data from the systems you test. Before it leaves, the agent masks the credentials and secrets it recognizes. To stop sharing: /datos no (or /datos local to keep them only on your PC).`,
+  );
+  if (rige === "no") return t(
+    "Sin telemetría: no se guardan ni se comparten trazas de tus sesiones. Si querés guardarlas en tu PC: /datos local. Si querés compartirlas con Elevate AI para mejorar el agente: /datos compartir.",
+    "No telemetry: traces of your sessions are neither kept nor shared. To keep them on your PC: /datos local. To share them with Elevate AI to improve the agent: /datos compartir.",
   );
   return t(
     `Trazas en modo «${rige}»: ${QUE_HACE()[rige]}.${rige === "local" ? ` Quedan en ${dir}.` : ""} /datos muestra el detalle y lo cambia.`,

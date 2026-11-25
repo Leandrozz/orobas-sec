@@ -16,6 +16,7 @@ import { credentialsDir } from "./secretos.ts";
 import { t } from "./idioma.ts";
 import { type HttpClient, isLoginUrl } from "./http.ts";
 import { configPath } from "./providers.ts";
+import { handleChatgptCallback } from "./chatgpt.ts";
 import { decide, type Scope } from "./scope.ts";
 import type { BrowserState } from "./navegador.ts";
 
@@ -230,6 +231,7 @@ export class ChromeBridge {
   async start(): Promise<void> {
     if (this.server) return;
     const server = createServer((req, res) => {
+      if (handleChatgptCallback(req, res)) return;
       // Sólo una extensión del navegador, y sólo con el código: una página web cualquiera no puede hablarle.
       const origin = String(req.headers.origin ?? "");
       if (origin && !origin.startsWith("chrome-extension://")) return void res.writeHead(401).end();

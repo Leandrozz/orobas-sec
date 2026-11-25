@@ -57,6 +57,8 @@ const MARCA = /‹SECRETO_(\d+)›/g;
 /** Lo que queda de un marcador en un texto que se guarda para que lo lea un modelo después (memoria, hallazgos). */
 export const SECRETO_GUARDADO = "‹secreto›";
 export const neutralizarMarcadores = (texto: string): string => texto.replace(MARCA, SECRETO_GUARDADO);
+/** Un marcador de cualquiera de las dos formas: el de la conversación, con número, o el guardado, sin él. */
+export const MARCADOR_SIN_REPONER = /‹(?:SECRETO_\d+|secreto)›/;
 
 /**
  * De dónde viene un valor o el texto donde apareció. Define su clase (claseDe):
@@ -220,6 +222,12 @@ export function origenDeProductor(productor: string | undefined): Origen {
 const GUARDAN_TEXTO = new Set(["memory_write", "finding_record", "finding_update", "investigation_output", "verdict", "grafo_anotar"]);
 /** Herramientas cuyos argumentos son un pedido a otro modelo de esta misma sesión: el marcador viaja tal cual y ahí sigue valiendo. */
 const HABLAN_CON_MODELOS = new Set(["delegate", "deep_reason"]);
+/**
+ * Herramientas que escriben o corren código en la máquina (el script de un laboratorio, un harness, un PoC): un
+ * marcador que les llega sin valor terminaría escrito como dato. Con número, reponer lo repone o corta con el motivo;
+ * «‹secreto›», el que queda en la memoria, los hallazgos y las salidas de investigación, no tiene valor que reponer.
+ */
+const ESCRIBEN_CODIGO = new Set(["shell", "harness_build", "poc_run", "fuzz_run"]);
 
 /** PR #32: un valor de menos de 6 caracteres o sin letras ni dígitos no se trata como secreto. */
 export const aprendible = (valor: string) => valor.length >= 6 && /[a-z0-9]/i.test(valor);
@@ -916,6 +924,8 @@ export class SecretosSesion {
     let calculado: { motivo: string | undefined } | undefined;
     const permiso = () => (calculado ??= { motivo: this.sinPermiso(herramienta, args) }).motivo;
     const repuesto = this.reponerHondo(args, desconocidos, permiso) as T;
+    const resto = desconocidos.size || !ESCRIBEN_CODIGO.has(nombreBase(herramienta)) ? undefined : MARCADOR_SIN_REPONER.exec(JSON.stringify(repuesto))?.[0];
+    if (resto) throw new Error(`No ejecuté ${herramienta}: lleva ${resto}, lo que queda de un secreto guardado en la memoria, un hallazgo o una investigación; no tiene valor que reponer y quedaría escrito como dato. Usá el valor real (el de un secreto del laboratorio, leelo de su archivo en la misma línea) o el marcador numerado que viste en esta conversación.`);
     return { args: repuesto, desconocidos: [...desconocidos] };
   }
 }

@@ -12,19 +12,21 @@ Cada tag `vX.Y.Z` produce un release (primero en borrador) con:
 | --- | --- |
 | `orobas-sec-vX.Y.Z.tar.gz` | El agente para el modo nativo, con sus dependencias de producción adentro (`npm ci --omit=dev --ignore-scripts`). Reproducible: mismas fechas, dueños y orden. |
 | `install.sh`, `install.ps1` | Los instaladores (Linux y macOS; Windows), con la versión del release adentro. |
-| `cyber-lanzador.sh`, `cyber-lanzador.ps1` | Los lanzadores del modo contenedor, con la versión y la imagen fijada por digest. Sólo si el release fija una imagen (ver «Imagen»). |
+| `cyber-lanzador.sh`, `cyber-lanzador.ps1`, `cyber.cmd` | Los lanzadores del modo contenedor, con la versión y la imagen fijada por digest, y el `cyber.cmd` que instala `install.ps1` para que `cyber` ande desde cmd y PowerShell. Los trae todo release que arma el workflow (ver «Imagen»). |
 | `SHA256SUMS` | La SHA-256 de cada archivo de arriba. |
 | `SHA256SUMS.sig` | La firma de `SHA256SUMS` (`ssh-keygen -Y sign`, espacio de nombres `orobas-sec-release`). |
 
 `scripts/release/armar.sh vX.Y.Z SALIDA` arma todo menos la firma; el workflow `.github/workflows/release.yml` del
-repositorio público lo corre al empujar un tag, firma y crea el release en borrador.
+repositorio público, al empujar un tag, arma y publica la imagen, corre `armar.sh` con el digest de esa imagen, firma y
+crea el release en borrador.
 
 ## Qué verifica el instalador
 
 1. Baja `SHA256SUMS` y `SHA256SUMS.sig` de la versión pedida (por defecto, la del instalador).
 2. Verifica la firma con la clave pública que trae adentro (`ssh-keygen -Y verify`), y que la lista firmada nombre
    `orobas-sec-vX.Y.Z.tar.gz` de esa misma versión (una lista firmada de otra versión no sirve).
-3. Baja cada archivo que va a usar y compara su SHA-256 con la de la lista firmada.
+3. Baja cada archivo que va a usar y compara su SHA-256 con la de la lista firmada (`install.ps1`:
+   `cyber-lanzador.ps1`, `cyber.cmd` y él mismo).
 4. Recién ahí instala, en el home y sin sudo. Ante cualquier falla no instala nada, borra lo que bajó y sale con error.
 
 `cyber --actualizar` hace lo mismo con el último release publicado (`/releases/latest`, que no incluye borradores ni
@@ -82,25 +84,43 @@ clave con la de este documento, la del README y la que trae `install.sh`: tienen
    y *Deployment branches and tags* limitado a los tags `v*`. Ahí, *Environment secrets → Add secret*
    `OROBAS_FIRMA_RELEASE` con el contenido de `~/.config/orobas-firma/release` (la privada, entera). El secreto no
    va como secreto del repositorio: así sólo lo ve el trabajo que firma, después de que lo apruebes.
+4. El primer release crea el paquete `orobas-sec` en ghcr.io. Antes de publicar ese borrador, dejalo público (ver
+   «Imagen»): el modo contenedor lo baja sin login.
 
 ### Cada release
 
-1. Que `main` del público tenga lo que querés publicar (CI en verde). Si va a tener modo contenedor, fijá la imagen
-   (ver «Imagen»).
+1. Que `main` del público tenga lo que querés publicar (CI en verde).
 2. `git tag -s vX.Y.Z` (o sin `-s`) sobre un commit de `main` y `git push origin vX.Y.Z`.
-3. El workflow arma, aprobás el trabajo `firmar` cuando GitHub lo pida, firma, comprueba la firma con la clave que
-   trae `install.sh` y crea el release **en borrador**.
-4. Revisá el borrador (archivos, notas) y publicalo a mano. Recién publicado lo ven `/releases/latest`, los
-   instaladores y `cyber --actualizar`.
+3. El workflow arma y publica la imagen, arma los archivos con su digest, y cuando GitHub lo pida aprobás el trabajo
+   `firmar`: firma, comprueba la firma con la clave que trae `install.sh` y crea el release **en borrador**.
+4. Revisá el borrador (archivos, notas, la imagen que nombra) y publicalo a mano. Recién publicado lo ven
+   `/releases/latest`, los instaladores y `cyber --actualizar`.
 
 ### Imagen
 
-El modo contenedor usa `ghcr.io/leandrozz/elevate-cyber` fijada **por digest**: `distro/imagen-release.txt` tiene
-una línea `REPOSITORIO@sha256:DIGEST` y `armar.sh` la pone en los lanzadores del release. Si ese archivo no fija una
-imagen, el release sale sin modo contenedor (sin lanzadores) en vez de apuntar a `latest`.
+El modo contenedor usa la imagen pública `ghcr.io/leandrozz/orobas-sec`, fijada **por digest** en los lanzadores de
+cada release. La arma **sólo** el workflow de release del repositorio público, desde el mismo commit del tag, y nadie
+tiene que commitear un digest a mano:
 
-- Construí y publicá la imagen (comentario al principio de `distro/Dockerfile`) y tomá el digest de arriba del índice:
-  `docker buildx imagetools inspect ghcr.io/leandrozz/elevate-cyber:TAG`.
+1. `comprobar`: el tag es `vX.Y.Z` y apunta a un commit de `main`. Hasta acá no se publica nada.
+2. `imagen`: `distro/Dockerfile` en dos runners nativos (amd64 y arm64, sin emulación ni caché), cada uno subido sólo
+   por digest.
+3. `indice`: junta los dos en un índice multiplataforma con la etiqueta `vX.Y.Z` (y `latest` si no es un
+   prerelease), comprueba que tenga linux/amd64 y linux/arm64 y le pasa a `armar` el digest de arriba del índice.
+4. `armar`: `armar.sh vX.Y.Z dist --imagen ghcr.io/leandrozz/orobas-sec@sha256:DIGEST` lo pone en los dos lanzadores
+   y comprueba que el release traiga `cyber-lanzador.sh`, `cyber-lanzador.ps1` y `cyber.cmd` con esa imagen.
+
+Esos trabajos tienen `packages: write` (los de la imagen) o sólo lectura, y ninguno ve la clave: `firmar` sigue siendo
+el único. Los lanzadores de un release bajan la imagen por digest y sin login (ni token de GitHub): Docker comprueba
+que sea exactamente esa. `latest` sólo la usa una copia de desarrollo del lanzador.
+
+- El paquete tiene que ser **público**. La primera vez, en
+  `https://github.com/users/Leandrozz/packages/container/orobas-sec/settings`, *Danger Zone → Change visibility →
+  Public*. Para comprobarlo sin tu sesión de ghcr.io:
+  `DOCKER_CONFIG=$(mktemp -d) docker manifest inspect ghcr.io/leandrozz/orobas-sec:vX.Y.Z` (tiene que listar las dos
+  plataformas, sin `unauthorized`).
+- Un release armado a mano (sin el workflow) fija la imagen con `--imagen` o con `distro/imagen-release.txt`; sin
+  ninguna de las dos sale sin modo contenedor (sin lanzadores) en vez de apuntar a `latest`.
 - Lo que la imagen baja de terceros está fijado con versión y SHA-256 en `distro/fijados.txt` (y semgrep con sus
   dependencias en `distro/semgrep-requisitos.txt`); la base, por digest en el `FROM`. Para subir versiones:
   `scripts/actualizar-fijados.sh --dir DIR` (busca versiones publicadas hace al menos 7 días, baja, calcula y

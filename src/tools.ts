@@ -251,6 +251,19 @@ export function createTools({ vault, artifacts, scope, findings, sessionId, evid
     },
   };
   const cvss = str({ description: "Vector CVSS:3.1 respaldado por la evidencia. Si está, determina la severidad." });
+  const revisarExclusion = (estado: string, cercana?: string, motivo?: string) => {
+    if (estado !== "candidato") return;
+    const citas = scope.current()?.reglas?.exclusiones ?? [];
+    if (!citas.length) return;
+    if (!cercana?.trim()) throw new Error("Antes de registrar un candidato falta exclusion_cercana: citá una exclusión textual de /alcance.");
+    if (!citas.some((item) => item.cita === cercana.trim())) throw new Error("exclusion_cercana debe ser una cita exacta de las reglas del programa en /alcance.");
+    if (!motivo?.trim()) throw new Error("Antes de registrar un candidato falta por_que_no_aplica: explicá por qué esa exclusión no cubre este caso.");
+  };
+  const revisarConfianza = (cita?: string) => {
+    if (!cita?.trim()) return;
+    const reglas = scope.current()?.reglas;
+    if (![...(reglas?.honestos ?? []), ...(reglas?.posicionAtacante ?? [])].some((item) => item.cita === cita.trim())) throw new Error("fuera_modelo_confianza debe citar exactamente una parte honesta o la posición del atacante en /alcance.");
+  };
   const findingRecord: Tool = {
     name: "finding_record",
     label: "Registrar hallazgo",
@@ -267,15 +280,20 @@ export function createTools({ vault, artifacts, scope, findings, sessionId, evid
       summary: str({ description: "Qué se observó, separado de lo que se infiere", maxLength: 1200 }),
       evidence: list(str({ description: "Hash de artefacto o id de intercambio HTTP (h12)" })),
       limits: str({ description: "Qué falta comprobar", maxLength: 300 }),
+      exclusion_cercana: str({ description: "Cita exacta de una exclusión en /alcance; obligatoria para candidato si hay reglas" }),
+      por_que_no_aplica: str({ description: "Por qué la exclusión cercana no cubre este caso" }),
+      fuera_modelo_confianza: str({ description: "Para una pista fuera del modelo: cita exacta de una parte honesta o de la posición del atacante en /alcance" }),
       related: related(" Si este hallazgo es la escalada de uno bajo (o al revés), vinculalos: el informe los muestra como cadena."),
     }, ["state", "title", "kind", "asset", "summary"]),
     execute: (params) => {
+      revisarExclusion(params.state, params.exclusion_cercana, params.por_que_no_aplica);
+      revisarConfianza(params.fuera_modelo_confianza);
       const host = /^[a-z][a-z0-9+.-]*:\/\//i.test(params.asset) || /^[a-z0-9.-]+\.[a-z]{2,}/i.test(params.asset) ? params.asset : undefined;
       if (host) {
         const decision = decide(scope.current(), host);
         if (!decision.allowed) throw new Error(`No se registra: ${decision.reason}`);
       }
-      const item = findings.record({ ...params, evidence: resolveEvidence(params.evidence) }, sessionId);
+      const item = findings.record({ ...params, exclusionCercana: params.exclusion_cercana, porQueNoAplica: params.por_que_no_aplica, fueraModeloConfianza: params.fuera_modelo_confianza, evidence: resolveEvidence(params.evidence) }, sessionId);
       return { ...text(`Registrado ${item.id.slice(0, 8)} como ${item.state}.`), details: { id: item.id.slice(0, 8), estado: item.state } };
     },
   };
@@ -292,13 +310,21 @@ export function createTools({ vault, artifacts, scope, findings, sessionId, evid
       summary: str({ maxLength: 1200 }),
       evidence: list(str()),
       limits: str({ maxLength: 300 }),
+      exclusion_cercana: str({ description: "Cita exacta de una exclusión en /alcance, al pasar a candidato" }),
+      por_que_no_aplica: str({ description: "Por qué la exclusión cercana no cubre este caso" }),
+      fuera_modelo_confianza: str({ description: "Marcá una pista fuera del modelo; vacío para quitar la marca" }),
       reason: str({ description: "Obligatorio al descartar", maxLength: 300 }),
       related: related(),
       escalation: str({ enum: [...ESCALATION_STATES], description: "La escalada conocida de este hallazgo: intentada (decí qué dio), limitada (qué faltó y por qué) o no aplica" }),
       escalation_note: str({ description: "Obligatoria con escalation", maxLength: 300 }),
     }, ["id"]),
     execute: (params) => {
-      const item = findings.update(params.id, { ...params, evidence: resolveEvidence(params.evidence), escalationNote: params.escalation_note }, sessionId);
+      // Sólo al pasar a candidato: uno de antes de cargar las reglas (o de otra sesión) sigue aceptando escalation,
+      // cvss y correcciones sin exclusion_cercana, como promete y pide src/cierre.ts.
+      const previo = findings.get(params.id);
+      if (params.state === "candidato" && previo?.state !== "candidato") revisarExclusion("candidato", params.exclusion_cercana ?? previo?.exclusionCercana, params.por_que_no_aplica ?? previo?.porQueNoAplica);
+      revisarConfianza(params.fuera_modelo_confianza);
+      const item = findings.update(params.id, { ...params, exclusionCercana: params.exclusion_cercana, porQueNoAplica: params.por_que_no_aplica, fueraModeloConfianza: params.fuera_modelo_confianza, evidence: resolveEvidence(params.evidence), escalationNote: params.escalation_note }, sessionId);
       return { ...text(`${item.id.slice(0, 8)} quedó como ${item.state}, rev ${item.rev}.`), details: { id: item.id.slice(0, 8), estado: item.state } };
     },
   };

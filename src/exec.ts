@@ -32,6 +32,22 @@ export interface ExecResult {
 }
 
 /** Rutas donde se buscan binarios: las del sistema más ~/go/bin, ~/.local/bin y Homebrew (Apple Silicon: /opt/homebrew; Intel: /usr/local). */
+/**
+ * Variables que apagan la telemetría, los chequeos de versión y los avisos de actualización de las herramientas que
+ * corre el agente (semgrep, npm, Next.js y las que respetan DO_NOT_TRACK). Van en todo proceso hijo: nada sale por
+ * la red sin que lo pida el operador. Las de ProjectDiscovery no tienen variable: llevan -duc en cada llamada.
+ */
+export const SIN_TELEMETRIA: Readonly<Record<string, string>> = {
+  DO_NOT_TRACK: "1",
+  SEMGREP_SEND_METRICS: "off",
+  SEMGREP_ENABLE_VERSION_CHECK: "0",
+  NO_UPDATE_NOTIFIER: "1",
+  NPM_CONFIG_UPDATE_NOTIFIER: "false",
+  NEXT_TELEMETRY_DISABLED: "1",
+  DISABLE_TELEMETRY: "1",
+  DISABLE_ERROR_REPORTING: "1",
+};
+
 export const SEARCH_PATH = [join(homedir(), "go", "bin"), join(homedir(), ".local", "bin"), "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/bin", "/bin"].join(delimiter);
 
 export function which(name: string): string | undefined {
@@ -101,7 +117,7 @@ export async function exec(options: ExecOptions): Promise<ExecResult> {
     let cancelled = false;
     const child = spawn(binary, args, {
       cwd: options.cwd,
-      env: { PATH: SEARCH_PATH, HOME: homedir(), LANG: "C.UTF-8", TERM: "dumb", ...options.env },
+      env: { PATH: SEARCH_PATH, HOME: homedir(), LANG: "C.UTF-8", TERM: "dumb", ...SIN_TELEMETRIA, ...options.env },
       stdio: [options.stdin !== undefined ? "pipe" : "ignore", "pipe", "pipe"],
       detached: true, // grupo de procesos propio, para poder matar también a los hijos
     });

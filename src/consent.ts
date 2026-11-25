@@ -86,6 +86,7 @@ export const citaTapada = (pedido: string, tapar: (texto: string) => string = (t
 
 /** Envía el consentimiento a los servidores de orobas (mismo canal que las trazas). Falla suave: queda local. */
 export async function sendConsent(kind: string, pedido: string, hash: string, at: string, apiKey: string | undefined, fetchImpl: typeof fetch = fetch, opciones: { tapar?: (texto: string) => string } = {}): Promise<string> {
+  if (!apiKey) throw new Error("Sin cuenta de orobas no se envía nada: el consentimiento quedó guardado localmente.");
   const base = process.env.OROBAS_BASE_URL?.replace(/\/$/, "") ?? "https://cyber.elevateai.ar/api/v1";
   const cita = comparteConServicio() ? citaTapada(pedido, opciones.tapar) : CONSTANCIA;
   const response = await fetchImpl(`${base}/consent`, {

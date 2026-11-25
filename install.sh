@@ -488,7 +488,7 @@ desinstalar() {
   echo 'No toco tus datos (sesiones, hallazgos, configuración y credenciales). Si los querés borrar, están en:'
   echo "  ${XDG_CONFIG_HOME:-$HOME/.config}/elevate-cyber"
   if [ "$SO" = Darwin ]; then echo "  $HOME/Library/Application Support/elevate-cyber"; else echo "  ${XDG_DATA_HOME:-$HOME/.local/share}/elevate-cyber"; fi
-  [ "$MODO" != contenedor ] || echo 'Las imágenes de Docker tampoco: docker image ls | grep elevate-cyber, y docker image rm las que no quieras.'
+  [ "$MODO" != contenedor ] || echo 'Las imágenes de Docker tampoco: docker image ls ghcr.io/leandrozz/orobas-sec, y docker image rm las que no quieras.'
   echo
   confirmar '¿Desinstalo?'
   [ -z "$quitar_bin" ] || rm -f "$BIN/cyber"

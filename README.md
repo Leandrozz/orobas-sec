@@ -6,16 +6,12 @@ Agente de pentest y bug bounty para la terminal, de [Elevate AI](https://cyber.e
 
 ## Instalar
 
-Linux y macOS, en tu home y sin sudo (necesita Node 22.19 o más nuevo; no instala herramientas de seguridad):
+### Linux y macOS
+
+En tu home y sin sudo (necesita Node 22.19 o más nuevo; no instala herramientas de seguridad):
 
 ```sh
 curl -fsSL https://github.com/Leandrozz/orobas-sec/releases/latest/download/install.sh | sh
-```
-
-Windows (modo contenedor, con Docker Desktop):
-
-```powershell
-irm https://github.com/Leandrozz/orobas-sec/releases/latest/download/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 El instalador es el de un release con tag e instala **esa** versión: antes de tocar nada muestra qué va a hacer, baja
@@ -24,8 +20,39 @@ y la suma SHA-256 de cada archivo. Ante cualquier falla no instala nada. Opcione
 `--modo nativo|contenedor`, `--prefix DIR`, `--bin DIR`, `--si` (sin preguntas); con `| sh -s -- --si` se pasan por
 la línea de arriba.
 
-**Verificá antes de ejecutar.** La línea de arriba confía en GitHub y en TLS para el instalador mismo. Para no
-confiar en nada más que en la clave:
+### Windows
+
+En Windows, Orobas corre en el modo contenedor: el agente y sus herramientas viven en la imagen de Docker
+`ghcr.io/leandrozz/orobas-sec` (pública: no hace falta cuenta ni login en ghcr.io) y en tu perfil se instala sólo el
+lanzador `cyber`, sin permisos de administrador. Hace falta:
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/), con contenedores Linux (lo predeterminado). Si
+  no está andando cuando corrés `cyber`, te ofrece abrirlo.
+- `ssh-keygen` de OpenSSH 8.1 o más nuevo, para verificar la firma: viene con Windows 11 (*Configuración → Sistema →
+  Características opcionales → Cliente OpenSSH*) y con [Git for Windows](https://git-scm.com/download/win). El que
+  trae Windows 10 suele ser más viejo; con Git for Windows instalado alcanza.
+
+En PowerShell:
+
+```powershell
+irm https://github.com/Leandrozz/orobas-sec/releases/latest/download/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+`install.ps1` muestra qué va a hacer y pide confirmación; baja `SHA256SUMS` y su firma, verifica la firma con la clave
+que trae adentro y la suma de `cyber-lanzador.ps1`, `cyber.cmd` e `install.ps1`, y recién entonces instala el lanzador
+(`cyber-lanzador.ps1` y `cyber.cmd`) en `%LOCALAPPDATA%\elevate-cyber\bin`, te ofrece sumar esa carpeta a tu PATH de
+usuario y guarda el instalador en `%LOCALAPPDATA%\orobas-sec`. Opciones: `-Version vX.Y.Z`, `-Prefix DIR`, `-Bin DIR`
+y `-Si` (sin preguntas: no toca el PATH, te dice cómo).
+
+Después abrí una terminal nueva, entrá a la carpeta de tu proyecto y escribí `cyber`. **La primera vez baja la imagen**
+(varios GB, con los escáneres, el navegador y los analizadores adentro; se ve el avance y tarda según tu conexión); las
+siguientes arranca directo. Es la imagen que fija el release, por digest: no cambia hasta que actualices.
+
+### Verificá antes de ejecutar
+
+Las líneas de arriba confían en GitHub y en TLS para el instalador mismo. Para no confiar en nada más que en la
+clave (en Windows, lo mismo desde Git Bash con `install.ps1` en lugar de `install.sh`, y al final
+`powershell -ExecutionPolicy Bypass -File .\install.ps1`):
 
 ```sh
 v=vX.Y.Z   # la versión que quieras, de https://github.com/Leandrozz/orobas-sec/releases
@@ -42,6 +69,8 @@ La clave pública de los releases es `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFfKpW
 `SHA256:CPDZhvVsZmr2nSQi2uvxgKpGmQ6K+mApWAvbkWPH27s`). Es la misma en este README, en [docs/releases.md](docs/releases.md) y
 dentro de cada instalador y lanzador.
 
+### Modos, actualizar y desinstalar
+
 **Dos modos.** Por defecto, *nativo*: el agente corre con tu Node, desde el paquete del release (con sus dependencias
 adentro), y corre comandos en tu máquina con tus permisos; `cyber toolbox` te dice qué escáneres faltan y cómo
 instalarlos, si los querés. Con `--modo contenedor` se instala el lanzador `cyber`, que corre el agente en la imagen
@@ -49,9 +78,10 @@ de Docker (fijada por digest en cada release) con los escáneres, el navegador y
 contenedor; es el único modo en Windows (o el nativo dentro de WSL).
 
 **Actualizar:** `cyber --actualizar` busca el último release publicado, verifica su firma y sus sumas igual que el
-instalador y recién entonces reemplaza (nunca baja de versión; sin terminal, sólo con `--si`). **Desinstalar:**
-`sh ~/.local/share/orobas-sec/install.sh --desinstalar` (en Windows, `install.ps1 -Desinstalar` desde
-`%LOCALAPPDATA%\orobas-sec`); no borra tus sesiones, hallazgos ni credenciales, y te dice dónde están.
+instalador y recién entonces reemplaza (nunca baja de versión; sin terminal, sólo con `--si`); en el modo contenedor
+después baja la imagen nueva. **Desinstalar:** `sh ~/.local/share/orobas-sec/install.sh --desinstalar` (en Windows,
+`powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\orobas-sec\install.ps1" -Desinstalar`); no borra tus
+sesiones, hallazgos ni credenciales, y te dice dónde están.
 
 Cómo se arma y firma cada release, y por qué con `ssh-keygen`: [docs/releases.md](docs/releases.md).
 
@@ -98,7 +128,15 @@ docker build -f distro/Dockerfile -t orobas-sec .
 CYBER_IMAGE=orobas-sec distro/lanzador/cyber
 ```
 
+La imagen de cada release es `ghcr.io/leandrozz/orobas-sec` (pública, linux/amd64 y linux/arm64): la arma el workflow
+de release de este repositorio desde el mismo commit del tag, con las etiquetas `vX.Y.Z` y `latest`, y los lanzadores
+del release la fijan por digest ([docs/releases.md](docs/releases.md), «Imagen»).
+
 Una copia del lanzador sacada del código no se actualiza sola (no trae la clave de los releases); la de un release sí, verificando la firma. Ver [docs/uso.md](docs/uso.md) y [docs/releases.md](docs/releases.md).
+
+## Privacidad
+
+Sin telemetría por defecto: el agente no guarda ni comparte trazas de tus sesiones, y las herramientas que corre (semgrep, las de ProjectDiscovery, npm) van con las métricas y los chequeos de versión apagados. Si querés, `/datos local` guarda el material de cada sesión en tu PC y `/datos compartir` lo manda a Elevate AI para mejorar el agente (sólo con los modelos de la suscripción y con los secretos tapados). Cada pedido al modelo viaja al proveedor que elegiste: eso no depende de este modo. Detalle en [docs/configuracion.md](docs/configuracion.md) (`CYBER_TRAZAS`).
 
 ## Documentación
 
@@ -109,6 +147,7 @@ Una copia del lanzador sacada del código no se actualiza sola (no trae la clave
 - [Desarrollo](docs/desarrollo.md): requisitos, pruebas, mapa de carpetas y estilo.
 - [Releases](docs/releases.md): instalación verificable, firma de los releases y versiones fijadas de la imagen.
 - [Integración continua](docs/ci.md): `cyber ci`, la GitHub Action, GitLab, códigos de salida y modelo de amenaza.
+- [Banco de CVE](docs/benchmark.md): ocho CVE reales con oráculo y versión corregida, para medir el agente de forma reproducible.
 - [Cambios](CHANGELOG.md).
 
 ## Pruebas

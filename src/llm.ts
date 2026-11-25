@@ -34,7 +34,7 @@ export interface Model {
   /** Ausente = precio desconocido: el costo queda pendiente, nunca en cero. */
   cost?: Rates;
   /** De dónde salió la tarifa: la publicada por el servicio, o la configuración del harness. */
-  costSource?: "servicio" | "configuración";
+  costSource?: "servicio" | "configuración" | "plan de ChatGPT";
   contextWindow?: number;
   /** Máximo de tokens de salida que puede producir una respuesta; se usa para reservar presupuesto. Por defecto 4096. */
   maxTokens?: number;
@@ -189,7 +189,7 @@ export function idleTimeoutFor(model: Model): number {
 export const forgetSilences = () => silences.clear();
 
 /** Arma el vigía de una solicitud: `alive` rearma el plazo y mide el hueco desde la última señal. */
-function watchdog(model: Model) {
+export function watchdog(model: Model) {
   const idle = new AbortController();
   const idleMs = idleTimeoutFor(model);
   let last = Date.now();

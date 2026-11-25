@@ -1,5 +1,7 @@
-# Imagen que fija el próximo release para el modo contenedor: una sola línea REPOSITORIO@sha256:DIGEST (el digest
+# Imagen que fija un release armado a mano para el modo contenedor: una sola línea REPOSITORIO@sha256:DIGEST (el digest
 # de arriba del índice multiplataforma, el que da «docker buildx imagetools inspect IMAGEN»). scripts/release/armar.sh
 # la pone en los lanzadores del release, que la bajan por digest: Docker comprueba que sea exactamente esa.
-# Mientras acá no haya una imagen fijada, los releases salen sin modo contenedor (sólo el nativo): nunca con «latest».
-# Ejemplo: ghcr.io/leandrozz/elevate-cyber@sha256:0123…(64 hex)
+# El workflow de release del repositorio público no lee este archivo: arma la imagen de ese mismo commit y se la pasa
+# a armar.sh con --imagen (docs/releases.md, «Imagen»).
+# Sin --imagen y sin una imagen fijada acá, el release sale sin modo contenedor (sólo el nativo): nunca con «latest».
+# Ejemplo: ghcr.io/leandrozz/orobas-sec@sha256:0123…(64 hex)

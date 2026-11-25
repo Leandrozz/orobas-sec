@@ -18,6 +18,7 @@ import { parseReportLang, type ReportLang } from "./report.ts";
 import { isAgentLabRule, localHint, parseRule, scopeView, type ScopeStore } from "./scope.ts";
 import { parseDecoyPattern, type DecoyMarks } from "./senuelos.ts";
 import { CabecerasPrograma, leerCabecera, lineasCabeceras } from "./cabeceras-programa.ts";
+import { bloqueReglas } from "./reglas-programa.ts";
 
 const normalize = (text: string) => text.normalize("NFC").toLowerCase().replace(/[«»"“”'‘’`]/g, "").replace(/\s+/g, " ").trim();
 
@@ -348,7 +349,7 @@ export function createOperatorTools(context: OperatorContext): Tool[] {
         const scope = bountyScope(program);
         scope.notes = client.redactor.finish(scope.notes);
         if (!scope.include.length) throw new Error("El programa no tiene activos importables.");
-        const saved = context.scope.save({ source: `cyber:${slug}`, include: scope.include, exclude: scope.exclude, notes: scope.notes });
+        const saved = context.scope.save({ source: `cyber:${slug}`, include: scope.include, exclude: scope.exclude, notes: scope.notes, reglas: scope.reglas });
         const rate = program.conduct.max_requests_per_second;
         if (Number.isFinite(rate) && rate > 0) context.http.rate = context.http.rate ? Math.min(context.http.rate, rate) : rate;
         loaded = { slug, program, etag: response.etag, rev: saved.rev };
@@ -518,6 +519,9 @@ export function createOperatorTools(context: OperatorContext): Tool[] {
         escaneres: { type: "boolean" },
         agente: str({ description: "User-Agent o «defecto»" }),
         cabeceras: list(str({ description: "Cabeceras fijas «Nombre: valor» que el operador confirma para este proyecto" })),
+        regla_exclusion: str({ description: "Cita textual del operador sobre algo que el programa excluye (12 a 160 caracteres)" }),
+        regla_honesto: str({ description: "Cita textual: parte que el modelo de confianza asume honesta" }),
+        regla_atacante: str({ description: "Cita textual: posición o capacidades iniciales del atacante" }),
         razonamiento: str({ enum: ["prendido", "apagado", "defecto", "bajo", "medio", "alto", "max"], description: "Razonamiento previo del modelo antes de responder: más calidad, más salida cobrada y más demora. Los niveles (bajo, medio, alto, max) dicen cuánto razona; si el modelo no tiene el pedido, va el más cercano" }),
         modelo: str({ description: "Modelo para el resto de la sesión: nombre corto (glm, qwen, deepseek, auto) o proveedor/modelo" }),
         modelo_fuerte: str({ description: "Modelo fuerte (deep_reason, delegate con strong): nombre corto, proveedor/modelo o «defecto»" }),
@@ -527,7 +531,7 @@ export function createOperatorTools(context: OperatorContext): Tool[] {
     },
     execute: async (params): Promise<ToolResult> => {
       const { ledger, http } = context;
-      const changes = ["presupuesto", "tope_proyecto", "peticiones", "ritmo", "escaneres", "agente", "cabeceras", "razonamiento", "modelo", "modelo_fuerte"].filter((key) => params[key] !== undefined && params[key] !== "");
+      const changes = ["presupuesto", "tope_proyecto", "peticiones", "ritmo", "escaneres", "agente", "cabeceras", "regla_exclusion", "regla_honesto", "regla_atacante", "razonamiento", "modelo", "modelo_fuerte"].filter((key) => params[key] !== undefined && params[key] !== "");
       if (changes.length) {
         const texts = context.operatorTexts();
         // Un «sí» sólo alcanza si responde a una pregunta que enumeraba todas las cabeceras.
@@ -539,6 +543,12 @@ export function createOperatorTools(context: OperatorContext): Tool[] {
           proposes: ({ question }) => cabecerasPedidas.every(([nombre, valor]) => normalize(question).includes(normalize(`${nombre}: ${valor}`))),
         }) : undefined;
         const quote = confirmacion ? normalize(String(params.pedido)) : operatorQuote(texts, params.pedido, "cambiar los ajustes de la sesión");
+        for (const [campo, tipo] of [["regla_exclusion", "exclusiones"], ["regla_honesto", "honestos"], ["regla_atacante", "posicionAtacante"]] as const) {
+          if (params[campo] === undefined) continue;
+          const cita = String(params[campo]);
+          if (!normalize(quote).includes(normalize(cita))) throw new Error(`${campo}: la cita debe estar textual en el pedido del operador.`);
+          context.scope.agregarRegla(tipo, cita);
+        }
         const numbers = (quote.match(/\d+(?:[.,]\d+)?/g) ?? []).map((value) => Number(value.replace(",", ".")));
         const unlimited = /\bsin\b|quit|sac[aá]|elimin|ilimit/.test(quote);
         const parse = (value: string, what: string) => {
@@ -631,6 +641,7 @@ export function createOperatorTools(context: OperatorContext): Tool[] {
         `escáneres externos: ${conduct.scanners ? "habilitados" : "apagados"}`,
         `User-Agent: ${conduct.userAgent}`,
         ...lineasCabeceras(context.cabeceras?.listar() ?? {}),
+        ...(changes.some((key) => key.startsWith("regla_")) ? [bloqueReglas(context.scope.current()?.reglas)] : []),
         ...(context.model ? [`modelo: ${context.model.current()}`] : []),
         ...(context.strong ? [`modelo fuerte: ${context.strong.current()}`] : []),
         ...(context.reasoning ? [reasoningLine(context.reasoning.get(), context.reasoning.model(), context.reasoning.caps?.())] : []),

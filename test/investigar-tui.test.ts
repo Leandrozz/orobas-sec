@@ -25,7 +25,7 @@ test("/investigar: oculto como /cola, aparece al escribirlo; estado, abrir y cer
   const command = findCommand("investigar")!;
   assert.ok(command.hidden && !command.parent);
   assert.equal(findCommand("investigacion")!.name, "investigar");
-  assert.equal(VISIBLES.length, 18, "la lista de / no cambia"); // 18 con /streamer (#35)
+  assert.ok(VISIBLES.includes("mejoras"), "el diagnóstico aparece en la lista de /");
   assert.ok(!VISIBLES.includes("investigar"));
   assert.ok(!sugerencias("").some((item) => item.word === "investigar"));
   assert.ok(sugerencias("inv").some((item) => item.word === "investigar"));

@@ -29,6 +29,18 @@ test("windows: install.ps1 y el lanzador comparten el mismo bloque de verificaci
   assert.match(comun(leer(PS1[0]!)), /ReadAllBytes\(\$entrada\)/);
 });
 
+test("windows: el cyber.cmd del release es el que escribe el lanzador, e install.ps1 lo baja y verifica como el resto", () => {
+  // El lanzador escribe cyber.cmd él mismo (--instalar, y al migrar una instalación vieja); install.ps1 instala el del
+  // release, verificado. Tienen que ser el mismo archivo, byte por byte, con fines de línea de Windows.
+  const lineas = /^\s*\$lineas = (.*)$/m.exec(leer("distro/lanzador/cyber.ps1"))?.[1];
+  assert.ok(lineas, "falta EscribirCmd en el lanzador");
+  const escrito = [...lineas.matchAll(/'([^']*)'/g)].map((m) => m[1]).join("\r\n") + "\r\n";
+  assert.equal(readFileSync(join(RAIZ, "distro/lanzador/cyber.cmd"), "latin1"), escrito);
+  assert.match(leer("install.ps1"), /foreach \(\$f in 'cyber-lanzador\.ps1', 'cyber\.cmd', 'install\.ps1'\)/);
+  assert.doesNotMatch(leer("install.ps1"), /EscribirCmd/, "install.ps1 no inventa su cyber.cmd: instala el firmado");
+  assert.match(leer("scripts/release/armar.sh"), /cp "\$A\/distro\/lanzador\/cyber\.cmd" "\$SALIDA\/cyber\.cmd"/);
+});
+
 const hayPwsh = spawnSync("pwsh", ["-NoProfile", "-Command", "1"]).status === 0;
 const skip = !hayPwsh ? "pwsh no está en el PATH" : !hay("ssh-keygen") || !hay("git") ? "faltan ssh-keygen o git" : false;
 const enWindows = process.platform === "win32";
@@ -116,6 +128,7 @@ test("windows: install.ps1 con firma y sumas válidas instala el lanzador y cybe
     assert.match(r.stdout, /Firma y sumas verificadas|Signature and checksums verified/);
     assert.equal(readFileSync(join(e.bin, "cyber-lanzador.ps1"), "utf8"), readFileSync(join(e.srv, "v1.0.0/cyber-lanzador.ps1"), "utf8"));
     assert.match(readFileSync(join(e.bin, "cyber.cmd"), "utf8"), /cyber-lanzador\.ps1/);
+    assert.deepEqual(readFileSync(join(e.bin, "cyber.cmd")), readFileSync(join(e.srv, "v1.0.0/cyber.cmd")), "el cyber.cmd firmado del release");
     assert.match(readFileSync(join(e.prefijo, "instalacion.conf"), "utf8"), /^version=v1\.0\.0\r?$/m);
     assert.match(r.stdout, /no está en tu PATH|is not in your PATH/, "con -Si no toca el PATH: dice cómo");
     assert.ok(vacia(e.tmp));
@@ -134,6 +147,12 @@ const fallas: [string, (srv: string) => void, RegExp][] = [
   ["una suma que no coincide", (srv) => appendFileSync(join(srv, "v1.0.0/cyber-lanzador.ps1"), "# agregado\n"), /cyber-lanzador\.ps1 no coincide|cyber-lanzador\.ps1 does not match/],
   ["una firma de otra clave", (srv) => firmar(otra, join(srv, "v1.0.0/SHA256SUMS")), /no es válida para la clave|is not valid for this file's key/],
   ["una firma alterada", (srv) => writeFileSync(join(srv, "v1.0.0/SHA256SUMS.sig"), readFileSync(join(srv, "v1.0.0/SHA256SUMS.sig"), "utf8").replace(/^(.{20})./m, "$1Z")), /no es válida para la clave|is not valid for this file's key/],
+  ["un cyber.cmd que no coincide con la suma", (srv) => appendFileSync(join(srv, "v1.0.0/cyber.cmd"), "@echo agregado\r\n"), /cyber\.cmd no coincide|cyber\.cmd does not match/],
+  ["un release sin cyber.cmd", (srv) => {
+    const f = join(srv, "v1.0.0/SHA256SUMS");
+    writeFileSync(f, readFileSync(f, "utf8").replace(/^.*  cyber\.cmd\n/m, ""));
+    firmar(clave, f);
+  }, /no trae cyber\.cmd|has no cyber\.cmd/],
   ["un release sin modo contenedor", (srv) => {
     const f = join(srv, "v1.0.0/SHA256SUMS");
     writeFileSync(f, readFileSync(f, "utf8").replace(/^.*cyber-lanzador.*\n/gm, ""));

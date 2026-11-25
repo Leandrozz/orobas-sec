@@ -5,9 +5,17 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { t } from "./idioma.ts";
 import { readSecret, secretState } from "./secretos.ts";
-import { anthropicMessages, type Faux, fauxTransport, type Model, openAICompletions, type Rates, type Transport } from "./llm.ts";
+import { anthropicMessages, type Effort, type Faux, fauxTransport, type Model, openAICompletions, type Rates, type Transport } from "./llm.ts";
 import { cachedModels } from "./tarifas.ts";
 import { OROBAS_ALIASES } from "./alias-orobas.ts";
+import { chatgptBaseUrl, chatgptCatalog, chatgptLinked } from "./chatgpt.ts";
+import { chatgptResponses } from "./chatgpt-responses.ts";
+
+/** Los GPT que razonan (gpt-5 en adelante, serie o) aceptan niveles; las variantes de chat, audio, imagen o búsqueda no. */
+export function chatgptReasoningCaps(slug: string): { reasoningEfforts?: Effort[]; reasoningOff?: boolean } {
+  const reasons = /^(gpt-([5-9]|\d{2,})|o\d)/i.test(slug) && !/(chat|audio|realtime|transcribe|tts|image|embedding|search)/i.test(slug);
+  return reasons ? { reasoningEfforts: ["low", "medium", "high", "max"], reasoningOff: false } : {};
+}
 
 interface ProviderConfig {
   baseUrl: string;
@@ -15,7 +23,7 @@ interface ProviderConfig {
   api?: "openai" | "anthropic";
   apiKeyEnv?: string;
   /** Tarifas y límites por modelo. Un modelo sin entrada funciona, con costo pendiente. */
-  models?: Record<string, { cost?: Rates; contextWindow?: number; maxTokens?: number; reasoning?: boolean }>;
+  models?: Record<string, { cost?: Rates; contextWindow?: number; maxTokens?: number; reasoning?: boolean; reasoningEfforts?: Effort[]; reasoningOff?: boolean }>;
 }
 
 interface Config {
@@ -68,6 +76,9 @@ const PRESETS: Record<string, ProviderConfig> = {
   anthropic: { baseUrl: "https://api.anthropic.com/v1", apiKeyEnv: "ANTHROPIC_API_KEY", api: "anthropic" },
   deepseek: { baseUrl: "https://api.deepseek.com/v1", apiKeyEnv: "DEEPSEEK_API_KEY" },
   openrouter: { baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY" },
+  get chatgpt(): ProviderConfig {
+    return { baseUrl: chatgptBaseUrl(), models: Object.fromEntries(chatgptCatalog().map((item) => [item.slug, chatgptReasoningCaps(item.slug)])) };
+  },
   // En el contenedor 127.0.0.1 es el propio contenedor: Ollama corre en el host.
   get ollama(): ProviderConfig {
     return { baseUrl: `http://${process.env.CYBER_PROYECTO_HOST ? "host.docker.internal" : "127.0.0.1"}:11434/v1` };
@@ -155,10 +166,11 @@ export function resolveProvider(spec?: string): Provider {
   }
   const info = provider.models?.[modelId];
   const { name: _name, kind: _kind, status: _status, ...fields } = (info ?? {}) as Record<string, unknown>;
+  const chatgpt = providerId === "chatgpt";
   return {
-    model: { provider: providerId, id: modelId, baseUrl: provider.baseUrl, apiKeyEnv: provider.apiKeyEnv, ...fields, ...(info?.cost ? { costSource: served[modelId]?.cost === info.cost ? "servicio" : "configuración" } : {}) } as Model,
-    transport: provider.api === "anthropic" ? anthropicMessages : openAICompletions,
-    account: provider.apiKeyEnv ?? "sin-clave",
+    model: { provider: providerId, id: modelId, baseUrl: chatgpt ? chatgptBaseUrl() : provider.baseUrl, apiKeyEnv: chatgpt ? undefined : provider.apiKeyEnv, ...fields, ...(chatgpt ? { cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costSource: "plan de ChatGPT" } : info?.cost ? { costSource: served[modelId]?.cost === info.cost ? "servicio" : "configuración" } : {}) } as Model,
+    transport: chatgpt ? chatgptResponses : provider.api === "anthropic" ? anthropicMessages : openAICompletions,
+    account: chatgpt ? "chatgpt" : provider.apiKeyEnv ?? "sin-clave",
   };
 }
 
@@ -186,6 +198,7 @@ export function defaultMediumModel(): string | undefined {
 export function modelLine(spec?: string): string {
   try {
     const { model } = resolveProvider(spec);
+    if (model.provider === "chatgpt") return chatgptLinked() ? "✓ chatgpt/" + model.id + " · Using ChatGPT plan" : "✗ chatgpt/" + model.id + " · entrá con /chatgpt";
     const name = `${model.provider}/${model.id}`;
     const env = model.apiKeyEnv;
     if (!env) return `✓ ${name}`;
@@ -215,6 +228,7 @@ export function keylessPresets(): string[] {
 export function readyProviders(): string[] {
   const declared = loadConfig().providers ?? {};
   return [...new Set([...Object.keys(PRESETS), ...Object.keys(declared)])].filter((id) => {
+    if (id === "chatgpt") return chatgptLinked();
     const provider = declared[id] ?? PRESETS[id]!;
     // Uno sin clave (un servidor local) cuenta sólo si el operador lo declaró.
     return provider.apiKeyEnv ? !!apiKey(provider.apiKeyEnv) : id in declared;

@@ -103,8 +103,11 @@ export class Ledger {
     // Uso ausente = desconocido (p. ej. un turno cortado). Un rechazo previo al
     // procesamiento no consumió tokens y se registra con uso cero conocido.
     const u = message.usage ?? (message.rejected ? { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 } : undefined);
-    const rates: Rates | undefined = u && ctx.model.cost;
+    // El costo del plan es cero aunque el stream se corte antes de informar tokens.
+    const plan = ctx.model.costSource === "plan de ChatGPT";
+    const rates: Rates | undefined = (u || plan) ? ctx.model.cost : undefined;
     const cost = (tokens: number, rate: number) => String(BigInt(tokens) * ratePico(rate));
+    const bucketCost = (tokens: number | undefined, rate: number) => tokens === undefined ? (plan ? "0" : null) : cost(tokens, rate);
     const result = this.db
       .prepare(
         `insert or ignore into requests(provider,account,request_id,session_id,worker,model,at,stop_reason,
@@ -127,10 +130,10 @@ export class Ledger {
         u?.output ?? null,
         u?.reasoning ?? null,
         rates ? JSON.stringify({ source: ctx.model.costSource ?? "configuración", model: ctx.model.id, usdPerMillion: rates }) : null,
-        u && rates ? cost(u.input, rates.input) : null,
-        u && rates ? cost(u.cacheRead, rates.cacheRead) : null,
-        u && rates ? cost(u.cacheWrite, rates.cacheWrite) : null,
-        u && rates ? cost(u.output, rates.output) : null,
+        rates ? bucketCost(u?.input, rates.input) : null,
+        rates ? bucketCost(u?.cacheRead, rates.cacheRead) : null,
+        rates ? bucketCost(u?.cacheWrite, rates.cacheWrite) : null,
+        rates ? bucketCost(u?.output, rates.output) : null,
       );
     const requestId = message.requestId;
     if (result.changes === 0) {

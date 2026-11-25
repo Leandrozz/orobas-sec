@@ -8,7 +8,7 @@ import "./datos-tmp.ts";
 // El servicio es de mentira (secretos-falsos.ts) y aplica la regla del gateway de orobas-sec-web #68 para decir qué
 // queda guardado. El servicio real se prueba en orobas-sec-web (test/trazas-material-objetivo.test.ts).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,7 +58,9 @@ const cuentaDePrueba = (base: string): Cerebro => (body, formato) => {
 const sinCredenciales = (base: string): Cerebro => (body, formato) =>
   resultados(body, formato).length === 0 ? { llamada: { name: "http_request", args: { url: `${base}/` } } } : { texto: "La portada dice hola." };
 
-async function sesion(formato: Formato, cerebro: (base: string) => Cerebro, opciones: { variable?: string; descartar?: () => number; cwd?: string } = {}) {
+// Estas pruebas son del modo «compartir», que desde el 25/11/2026 se elige a mano: sin variable, la sesión lo elige.
+// `variable: null` deja la máquina sin elegir (el modo por defecto, «no»).
+async function sesion(formato: Formato, cerebro: (base: string) => Cerebro, opciones: { variable?: string | null; descartar?: () => number; cwd?: string } = {}) {
   const target = await objetivo();
   const svc = proveedor(formato, () => target.base, cerebro(target.base), { ids: true, descartar: opciones.descartar });
   const svcBase = `${await escuchar(svc.server)}/v1`;
@@ -67,7 +69,7 @@ async function sesion(formato: Formato, cerebro: (base: string) => Cerebro, opci
   writeFileSync(join(dir, "config.json"), JSON.stringify({ providers: { orobas: { baseUrl: svcBase, apiKeyEnv: "OROBAS_API_KEY" } } }));
   process.env.CYBER_CONFIG = join(dir, "config.json");
   process.env.OROBAS_API_KEY = "oro_prueba_descartes_1";
-  if (opciones.variable === undefined) delete process.env.CYBER_TRAZAS; else process.env.CYBER_TRAZAS = opciones.variable;
+  if (opciones.variable === null) delete process.env.CYBER_TRAZAS; else process.env.CYBER_TRAZAS = opciones.variable ?? "compartir";
   const cwd = opciones.cwd ?? join(dir, "proyecto");
   mkdirSync(cwd, { recursive: true });
   const provider = { model: { provider: "orobas", id: "descartes", baseUrl: svcBase, apiKeyEnv: "OROBAS_API_KEY" }, transport: formato === "openai" ? openAICompletions : anthropicMessages, account: "OROBAS_API_KEY" };
@@ -104,7 +106,7 @@ for (const formato of ["openai"] as const) {
     const s = await sesion(formato, cuentaDePrueba);
     try {
       anotarModoCuenta(undefined);
-      assert.equal(modoTrazas(), "compartir", "el modo por defecto");
+      assert.equal(modoTrazas(), "compartir", "elegido a mano");
       const engine = s.abrir();
       await turnoYCierre(engine, s.svc, "Creá una cuenta de prueba y entrá con ella.");
       const modelo = s.svc.modelo();
@@ -146,14 +148,14 @@ test("compartir sin credenciales: no se descarta nada y los pedidos al modelo qu
   } finally { s.cerrar(); }
 });
 
-for (const variable of ["no", "local"] as const) {
-  test(`en «${variable}» el gateway no guarda contenido: no hace falta descartar nada`, async () => {
+for (const variable of ["no", "local", null] as const) {
+  test(`en «${variable ?? "no"}»${variable === null ? " (sin elegir nada: el modo por defecto)" : ""} el gateway no guarda contenido: no hace falta descartar nada`, async () => {
     const s = await sesion("openai", cuentaDePrueba, { variable });
     try {
       const engine = s.abrir();
       await engine.send("Creá una cuenta de prueba y entrá con ella.");
       await engine.close();
-      assert.ok(s.svc.modelo().every((pedido) => pedido.trazas === variable));
+      assert.ok(s.svc.modelo().every((pedido) => pedido.trazas === (variable ?? "no")));
       assert.deepEqual(descartes(s.svc), []);
       assert.deepEqual(guardadoPorElGateway(s.svc.cuerpos), []);
     } finally { s.cerrar(); }
@@ -206,7 +208,7 @@ async function servicioDeCuenta(trazas?: string) {
   return { base: `${await escuchar(server)}/v1`, cerrar: () => { server.closeAllConnections(); server.close(); } };
 }
 
-test("una instalación que ya existía, sin ajuste guardado, arranca en compartir (con el servicio de hoy y con el nuevo)", async () => {
+test("una instalación que ya existía, sin ajuste guardado, arranca en «no»; la cuenta nunca lo amplía", async () => {
   const prev = { trazas: process.env.CYBER_TRAZAS, key: process.env.OROBAS_API_KEY, base: process.env.OROBAS_BASE_URL };
   const config = process.env.CYBER_CONFIG!;
   try {
@@ -214,13 +216,13 @@ test("una instalación que ya existía, sin ajuste guardado, arranca en comparti
     // La configuración de antes: proveedores e idioma, sin «trazas».
     writeFileSync(config, JSON.stringify({ providers: {}, idioma: "es" }));
     process.env.OROBAS_API_KEY = "oro_prueba";
-    for (const [cuenta, rige] of [[undefined, "compartir"], ["compartir", "compartir"], ["no", "no"]] as const) {
+    for (const [cuenta, rige] of [[undefined, "no"], ["compartir", "no"], ["local", "no"], ["no", "no"]] as const) {
       const svc = await servicioDeCuenta(cuenta);
       try {
         process.env.OROBAS_BASE_URL = svc.base;
         configureAccount();
         await refrescarModoCuenta();
-        assert.deepEqual(modoLocal(), { modo: "compartir", origen: "defecto" });
+        assert.deepEqual(modoLocal(), { modo: "no", origen: "defecto" });
         assert.equal(modoTrazas(), rige, `cuenta ${cuenta ?? "sin el campo (servicio de hoy)"}`);
       } finally { svc.cerrar(); }
     }
@@ -233,15 +235,15 @@ test("una instalación que ya existía, sin ajuste guardado, arranca en comparti
   }
 });
 
-test("una revocación de /datos de antes sigue valiendo: sin modo elegido, el proyecto arranca en «no»; un permiso posterior o un modo elegido mandan", async () => {
+test("sin modo elegido rige «no», haya o no consentimientos de versiones anteriores; un modo elegido manda, y no hay aviso de migración", async () => {
   const prevTrazas = process.env.CYBER_TRAZAS;
   const config = process.env.CYBER_CONFIG!;
-  const casos: Array<{ nombre: string; registros: Array<[string, string]>; config?: object; rige: string; aviso: boolean }> = [
-    { nombre: "revocó", registros: [["trayectorias-no", "2026-11-10T10:00:00Z"]], rige: "no", aviso: true },
-    { nombre: "dio el permiso y después revocó", registros: [["trayectorias", "2026-11-01T10:00:00Z"], ["trayectorias-no", "2026-11-10T10:00:00Z"]], rige: "no", aviso: true },
-    { nombre: "revocó y después volvió a compartir", registros: [["trayectorias-no", "2026-11-01T10:00:00Z"], ["trayectorias", "2026-11-10T10:00:00Z"]], rige: "compartir", aviso: false },
-    { nombre: "nunca tocó /datos", registros: [], rige: "compartir", aviso: false },
-    { nombre: "revocó, pero ya eligió «local» con la versión nueva", registros: [["trayectorias-no", "2026-11-10T10:00:00Z"]], config: { trazas: "local" }, rige: "local", aviso: false },
+  const casos: Array<{ nombre: string; registros: Array<[string, string]>; config?: object; rige: string }> = [
+    { nombre: "revocó", registros: [["trayectorias-no", "2026-11-10T10:00:00Z"]], rige: "no" },
+    { nombre: "revocó y después volvió a compartir (sin elegirlo en la versión nueva)", registros: [["trayectorias-no", "2026-11-01T10:00:00Z"], ["trayectorias", "2026-11-10T10:00:00Z"]], rige: "no" },
+    { nombre: "nunca tocó /datos", registros: [], rige: "no" },
+    { nombre: "eligió «local»", registros: [["trayectorias-no", "2026-11-10T10:00:00Z"]], config: { trazas: "local" }, rige: "local" },
+    { nombre: "eligió «compartir»", registros: [], config: { trazas: "compartir" }, rige: "compartir" },
   ];
   try {
     delete process.env.CYBER_TRAZAS;
@@ -251,24 +253,16 @@ test("una revocación de /datos de antes sigue valiendo: sin modo elegido, el pr
       rmSync(config, { force: true });
       if (caso.config) writeFileSync(config, JSON.stringify(caso.config));
       try {
-        // Lo que dejó la versión anterior en la base del proyecto.
         const db = openStore(projectPaths(cwd));
-        const store = new ConsentStore(db);
+        new ConsentStore(db); // crea la tabla, como la versión anterior
         for (const [kind, at] of caso.registros) db.prepare("insert or replace into consents(kind,at,hash,pedido) values(?,?,?,?)").run(kind, at, `sha256:${kind}`, "cita");
-        assert.equal(store.has("trayectorias-no"), caso.registros.some(([kind]) => kind === "trayectorias-no"));
         db.close();
         const engine = new Engine({ cwd, provider: { model: { provider: "faux", id: "faux", baseUrl: "http://127.0.0.1:9", apiKeyEnv: "" }, transport: async () => { throw new Error("sin modelo"); } } as never, budgetPico: usdToPico("1"), cveFeed: false });
         try {
           assert.equal(modoTrazas(), caso.rige, caso.nombre);
-          assert.equal(engine.notices.some((aviso) => /Habías revocado/.test(aviso)), caso.aviso, caso.nombre);
-          // Una sola vez: la segunda apertura ya encuentra el modo en la configuración.
-          if (caso.aviso) assert.deepEqual(modoLocal(), { modo: "no", origen: "configuración" });
+          assert.ok(!engine.notices.some((aviso) => /Habías revocado/.test(aviso)), caso.nombre);
+          if (!caso.config) assert.equal(existsSync(config), false, `${caso.nombre}: no escribe la configuración`);
         } finally { await engine.close(); }
-        if (caso.aviso) {
-          const otra = new Engine({ cwd, provider: { model: { provider: "faux", id: "faux", baseUrl: "http://127.0.0.1:9", apiKeyEnv: "" }, transport: async () => { throw new Error("sin modelo"); } } as never, budgetPico: usdToPico("1"), cveFeed: false });
-          assert.ok(!otra.notices.some((aviso) => /Habías revocado/.test(aviso)));
-          await otra.close();
-        }
       } finally { rmSync(cwd, { recursive: true, force: true }); }
     }
   } finally {

@@ -4,7 +4,10 @@
 $ErrorActionPreference = 'Continue'  # con Stop, 2>&1 sobre un exe rompe en PS 5.1
 $VersionLanzador = ''  # la completa el release (scripts/release/armar.sh); vacía en una copia de desarrollo
 $ImagenRelease = ''    # la imagen que fija ese release, por digest; vacía en una copia de desarrollo
-$Imagen = if ($env:CYBER_IMAGE) { $env:CYBER_IMAGE } elseif ($ImagenRelease) { $ImagenRelease } else { 'ghcr.io/leandrozz/elevate-cyber:latest' }
+$Imagen = if ($env:CYBER_IMAGE) { $env:CYBER_IMAGE } elseif ($ImagenRelease) { $ImagenRelease } else { 'ghcr.io/leandrozz/orobas-sec:latest' }
+# La imagen pública (la que arma el workflow de release del repositorio público) se baja sin login: con ella el lanzador
+# nunca pide un token de GitHub. Con una imagen privada de ghcr.io lo pide la primera vez.
+$ImagenPublica = 'ghcr.io/leandrozz/orobas-sec'
 # --actualizar sólo reemplaza este archivo por el del último release, después de verificar la firma de su
 # SHA256SUMS con esta clave (ssh-keygen -Y verify) y la suma del lanzador. CYBER_RELEASES_URL cambia de dónde baja.
 $ReleasesUrl = if ($env:CYBER_RELEASES_URL) { $env:CYBER_RELEASES_URL } else { 'https://github.com/Leandrozz/orobas-sec/releases' }
@@ -347,9 +350,14 @@ if (-not (DockerAndando)) {
   if (-not $arranco) { Salir (t 'Docker no arrancó a tiempo.' 'Docker did not start in time.') }
 }
 
-# 2 y 3. Imagen: login en ghcr.io la primera vez y actualización con confirmación
+# 2 y 3. Imagen: la primera vez se baja entera (varios GB) mostrando el avance; login en ghcr.io sólo si no es la pública; actualización con confirmación
+function EsPublica { "$Imagen" -match ('^' + [regex]::Escape($ImagenPublica) + '([:@]|$)') }
 function Bajar {
-  $s = Dk pull $Imagen | Out-String
+  Write-Host ((t 'Bajando la imagen ' 'Pulling the image ') + $Imagen + (t ' (la primera vez son varios GB)...' ' (several GB the first time)...'))
+  $s = Dk pull $Imagen | ForEach-Object { $l = "$_"; Write-Host $l; $l } | Out-String
+  if ($LASTEXITCODE -ne 0 -and $s -match 'unauthorized|denied' -and (EsPublica)) {
+    Salir (t 'ghcr.io rechazó la descarga de la imagen pública, que se baja sin login. Si iniciaste sesión en ghcr.io con un token que ya no sirve, cerrala (docker logout ghcr.io) y volvé a correr cyber.' 'ghcr.io refused the public image, which needs no login. If you logged in to ghcr.io with a token that no longer works, log out (docker logout ghcr.io) and run cyber again.')
+  }
   if ($LASTEXITCODE -ne 0 -and $s -match 'unauthorized|denied') {
     Write-Host (t 'Creá un token (read:packages) en https://github.com/settings/tokens/new?scopes=read:packages' 'Create a token (read:packages) at https://github.com/settings/tokens/new?scopes=read:packages')
     $u = Read-Host (t 'Usuario de GitHub' 'GitHub username')
@@ -358,9 +366,9 @@ function Bajar {
     else { $plano = [Net.NetworkCredential]::new('', (Read-Host $msg -AsSecureString)).Password }
     $plano | & docker login ghcr.io -u $u --password-stdin | Out-Null  # el token va por stdin, no por argv
     if ($LASTEXITCODE -ne 0) { Salir (t 'No pude iniciar sesión en ghcr.io.' 'Could not log in to ghcr.io.') }
-    $s = Dk pull $Imagen | Out-String
+    $s = Dk pull $Imagen | ForEach-Object { $l = "$_"; Write-Host $l; $l } | Out-String
   }
-  if ($LASTEXITCODE -ne 0) { Salir ((t 'No pude bajar la imagen: ' 'Could not pull the image: ') + $s) }
+  if ($LASTEXITCODE -ne 0) { Salir (t 'No pude bajar la imagen (el error está arriba).' 'Could not pull the image (the error is above).') }
 }
 # --actualizar: el lanzador ya se actualizó (o no hacía falta) al principio; acá sólo queda la imagen.
 if ($args | Where-Object { $_ -in '--actualizar', '--actualizar-imagen' }) {

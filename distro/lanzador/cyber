@@ -5,7 +5,10 @@
 # Se instala con install.sh desde un release firmado (README, «Instalar»), nunca desde main.
 VERSION_LANZADOR=''  # la completa el release (scripts/release/armar.sh); vacía en una copia de desarrollo
 IMAGEN_RELEASE=''    # la imagen que fija ese release, por digest; vacía en una copia de desarrollo
-IMAGEN=${CYBER_IMAGE:-${IMAGEN_RELEASE:-ghcr.io/leandrozz/elevate-cyber:latest}}
+IMAGEN=${CYBER_IMAGE:-${IMAGEN_RELEASE:-ghcr.io/leandrozz/orobas-sec:latest}}
+# La imagen pública (la que arma el workflow de release del repositorio público) se baja sin login: con ella el lanzador
+# nunca pide un token de GitHub ni ofrece pasar uno al llavero. Con una imagen privada de ghcr.io lo pide la primera vez.
+IMAGEN_PUBLICA=ghcr.io/leandrozz/orobas-sec
 # --actualizar sólo reemplaza este archivo por el del último release, después de verificar la firma de su
 # SHA256SUMS con esta clave (ssh-keygen -Y verify) y la suma del lanzador. CYBER_RELEASES_URL cambia de dónde baja.
 RELEASES_URL=${CYBER_RELEASES_URL:-https://github.com/Leandrozz/orobas-sec/releases}
@@ -219,7 +222,8 @@ HAYST=
 [ "$SO" = Linux ] && command -v secret-tool >/dev/null 2>&1 && HAYST=1
 KR=$HAYST
 GHCR=
-if [ -n "$KR" ]; then
+publica() { case $IMAGEN in "$IMAGEN_PUBLICA" | "$IMAGEN_PUBLICA":* | "$IMAGEN_PUBLICA"@*) return 0 ;; *) return 1 ;; esac; }
+if [ -n "$KR" ] && ! publica; then
   if limite 5 secret-tool lookup service elevate-cyber account ghcr; then GHCR=$(cat "$TMP/salida"); fi
 fi
 # El secreto pasa por stdin desde un archivo 0700 que se borra enseguida (limite corre en segundo plano y no hereda stdin).
@@ -316,7 +320,7 @@ auth_limite() {
 
 # Token de GitHub guardado sin cifrar en ~/.docker/config.json: se ofrece pasarlo al llavero una sola vez.
 migrar() {
-  [ -n "$KR" ] && [ -z "$GHCR" ] && [ ! -e "$CRED/.token-plano" ] && [ -f "$HOME/.docker/config.json" ] || return 0
+  [ -n "$KR" ] && [ -z "$GHCR" ] && ! publica && [ ! -e "$CRED/.token-plano" ] && [ -f "$HOME/.docker/config.json" ] || return 0
   c=$(tr -d ' \n\t\r' <"$HOME/.docker/config.json")
   # shortcut: cualquier credsStore/credHelpers se toma como que ghcr.io ya está cubierto; afinar si aparece un caso real.
   case $c in *'"credsStore"'* | *'"credHelpers"'*) return 0 ;; esac
@@ -344,6 +348,10 @@ traer() {
     [ "$rc" = 98 ] && echo "$(t 'No pude conectar con ghcr.io.' 'Could not reach ghcr.io.')" >&2
     return 1
   }
+  if publica; then
+    echo "$(t 'ghcr.io rechazó la descarga de la imagen pública, que se baja sin login. Si iniciaste sesión en ghcr.io con un token que ya no sirve, cerrala (docker logout ghcr.io) y volvé a correr cyber.' 'ghcr.io refused the public image, which needs no login. If you logged in to ghcr.io with a token that no longer works, log out (docker logout ghcr.io) and run cyber again.')" >&2
+    return 1
+  fi
   [ -n "$GHCR" ] && echo "$(t 'El token de GitHub guardado ya no sirve: ingresá uno nuevo.' 'The saved GitHub token no longer works: enter a new one.')" >&2
   echo "$(t 'Creá un token (read:packages) en' 'Create a token (read:packages) at') https://github.com/settings/tokens/new?scopes=read:packages" >&2
   printf '%s ' "$(t 'Usuario de GitHub:' 'GitHub user:')" >&2

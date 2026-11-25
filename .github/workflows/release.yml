@@ -1,7 +1,8 @@
-# Release del repositorio público: al empujar un tag vX.Y.Z (de un commit de main) arma los archivos con
-# scripts/release/armar.sh, firma SHA256SUMS con la clave del entorno «release» y crea el release EN BORRADOR.
-# Lo publica una persona después de revisarlo. Sólo runners de GitHub; cada trabajo con los permisos mínimos;
-# acciones fijadas por SHA de commit. Qué hay que configurar una vez: docs/releases.md.
+# Release del repositorio público: al empujar un tag vX.Y.Z (de un commit de main) arma la imagen del modo contenedor
+# desde ese mismo commit y la publica en ghcr.io (amd64 y arm64), arma los archivos con scripts/release/armar.sh con
+# el digest de esa imagen fijado en los lanzadores, firma SHA256SUMS con la clave del entorno «release» y crea el
+# release EN BORRADOR. Lo publica una persona después de revisarlo. Sólo runners de GitHub; cada trabajo con los
+# permisos mínimos; acciones fijadas por SHA de commit. Qué hay que configurar una vez: docs/releases.md.
 name: Release
 on:
   push:
@@ -11,10 +12,10 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  armar:
-    # Arma sin ver la clave ni poder escribir en el repositorio.
+  comprobar:
+    # Antes de publicar nada (tampoco la imagen): el tag es vX.Y.Z y apunta a un commit de main.
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
@@ -22,9 +23,6 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 26.13.1
       - name: El tag es vX.Y.Z y apunta a un commit de main
         env:
           TAG: ${{ github.ref_name }}
@@ -32,10 +30,144 @@ jobs:
           printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+  imagen:
+    # distro/Dockerfile de este commit, una plataforma por runner nativo (sin emulación) y sin caché: cada release se
+    # construye de cero. Cada plataforma se sube sólo por digest; el índice multiplataforma lo arma «indice».
+    needs: comprobar
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arquitectura: amd64
+            runner: ubuntu-24.04
+          - arquitectura: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Nombre de la imagen
+        run: echo "IMAGEN=ghcr.io/${GITHUB_REPOSITORY,,}" >>"$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: distro/Dockerfile
+          platforms: linux/${{ matrix.arquitectura }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          outputs: type=image,name=${{ env.IMAGEN }},push-by-digest=true,name-canonical=true,push=true
+      - name: Anotar el digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ARQUITECTURA: ${{ matrix.arquitectura }}
+        run: |
+          set -eu
+          printf '%s\n' "$DIGEST" | grep -Eqx 'sha256:[0-9a-f]{64}'
+          mkdir -p "$RUNNER_TEMP/digest"
+          printf '%s\n' "$DIGEST" >"$RUNNER_TEMP/digest/$ARQUITECTURA"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.arquitectura }}
+          path: ${{ runner.temp }}/digest/${{ matrix.arquitectura }}
+          if-no-files-found: error
+          retention-days: 1
+
+  indice:
+    # Junta las dos plataformas en un índice con la etiqueta del tag (y «latest» si no es un prerelease), comprueba que
+    # tenga linux/amd64 y linux/arm64 y le pasa a «armar» la imagen fijada por el digest de arriba del índice.
+    needs: imagen
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      packages: write
+    outputs:
+      imagen: ${{ steps.indice.outputs.imagen }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digest
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: indice
+        name: Armar el índice multiplataforma y comprobarlo
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          imagen="ghcr.io/${GITHUB_REPOSITORY,,}"
+          fuentes=()
+          for a in amd64 arm64; do
+            d=$(cat "$RUNNER_TEMP/digest/$a")
+            printf '%s\n' "$d" | grep -Eqx 'sha256:[0-9a-f]{64}'
+            fuentes+=("$imagen@$d")
+          done
+          etiquetas=(-t "$imagen:$TAG")
+          case $TAG in *-*) ;; *) etiquetas+=(-t "$imagen:latest") ;; esac
+          docker buildx imagetools create "${etiquetas[@]}" \
+            --annotation "index:org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --annotation "index:org.opencontainers.image.revision=$GITHUB_SHA" \
+            --annotation "index:org.opencontainers.image.version=$TAG" \
+            --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
+            --annotation "index:org.opencontainers.image.description=Orobas: agente de pentest y bug bounty, con su caja de herramientas y Chromium" \
+            "${fuentes[@]}"
+          docker buildx imagetools inspect "$imagen:$TAG" --format '{{json .Manifest}}' >"$RUNNER_TEMP/indice.json"
+          digest=$(jq -r .digest "$RUNNER_TEMP/indice.json")
+          printf '%s\n' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}'
+          plataformas=$(jq -r '[.manifests[].platform | select(.os == "linux") | .os + "/" + .architecture] | sort | join(" ")' "$RUNNER_TEMP/indice.json")
+          [ "$plataformas" = 'linux/amd64 linux/arm64' ] || { echo "::error::El índice no trae linux/amd64 y linux/arm64: $plataformas"; exit 1; }
+          echo "Imagen del release: $imagen@$digest ($plataformas)"
+          echo "imagen=$imagen@$digest" >>"$GITHUB_OUTPUT"
+
+  armar:
+    # Arma sin ver la clave ni poder escribir en el repositorio, con la imagen que acaba de armar «indice».
+    needs: indice
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.1
       - name: Armar
         env:
           TAG: ${{ github.ref_name }}
-        run: scripts/release/armar.sh "$TAG" dist --repo "$GITHUB_REPOSITORY"
+          IMAGEN: ${{ needs.indice.outputs.imagen }}
+        run: scripts/release/armar.sh "$TAG" dist --repo "$GITHUB_REPOSITORY" --imagen "$IMAGEN"
+      - name: El release trae el modo contenedor con esa imagen
+        env:
+          IMAGEN: ${{ needs.indice.outputs.imagen }}
+        run: |
+          set -eu
+          for f in cyber-lanzador.sh cyber-lanzador.ps1 cyber.cmd install.ps1 install.sh; do
+            grep -q "  $f\$" dist/SHA256SUMS || { echo "::error::Falta $f en SHA256SUMS."; exit 1; }
+          done
+          grep -qxF "IMAGEN_RELEASE='$IMAGEN'" dist/cyber-lanzador.sh
+          grep -qxF "\$ImagenRelease = '$IMAGEN'" dist/cyber-lanzador.ps1
+          grep -q 'cyber-lanzador\.ps1' dist/cyber.cmd
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release
@@ -45,7 +177,7 @@ jobs:
 
   firmar:
     # Sólo este trabajo ve la clave privada: es un secreto del entorno «release», que pide aprobación manual.
-    needs: armar
+    needs: [indice, armar]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release
@@ -84,12 +216,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          IMAGEN: ${{ needs.indice.outputs.imagen }}
         run: |
           set -eu
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          # Los acentos graves de las notas son Markdown, no sustituciones de comandos.
+          # shellcheck disable=SC2016
           {
-            echo "Instalar (Linux y macOS): \`curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh | sh\`"
-            echo
-            echo "Antes de ejecutar, verificá la firma de \`SHA256SUMS\` con la clave de los releases (huella \`$HUELLA\`) y la suma de lo que bajes: README, «Verificá antes de ejecutar»."
-            grep -q 'cyber-lanzador' dist/SHA256SUMS || { echo; echo 'Este release no trae modo contenedor (no fija una imagen).'; }
+            printf 'Instalar (Linux y macOS): `curl -fsSL %s/install.sh | sh`\n\n' "$base"
+            printf 'Instalar en Windows (modo contenedor, con Docker Desktop andando), en PowerShell: `irm %s/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\\install.ps1`. La primera vez que corras `cyber` baja la imagen (varios GB, sin login).\n\n' "$base"
+            printf 'Imagen del modo contenedor, fijada por digest en los lanzadores: `%s`\n\n' "$IMAGEN"
+            printf 'Antes de ejecutar, verificá la firma de `SHA256SUMS` con la clave de los releases (huella `%s`) y la suma de lo que bajes: README, «Verificá antes de ejecutar».\n' "$HUELLA"
           } >"$RUNNER_TEMP/notas.md"
           gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Orobas $TAG" --notes-file "$RUNNER_TEMP/notas.md"

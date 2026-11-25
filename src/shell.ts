@@ -10,6 +10,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Tool, ToolResult } from "./agent.ts";
 import type { Artifacts } from "./artifacts.ts";
 import { exec, SEARCH_PATH } from "./exec.ts";
+import { MARCADOR_SIN_REPONER } from "./secretos-sesion.ts";
 
 export type ShellKind = "lectura" | "escritura" | "red" | "destructivo";
 
@@ -256,6 +257,8 @@ export function createShellTool(context: ShellContext): Tool {
     execute: async (params, signal): Promise<ToolResult> => {
       const command = String(params.command ?? "").replace(/\r/g, "").trim();
       if (!command) throw new Error("Pasá un comando");
+      // Desde el motor, reponer ya cortó (src/secretos-sesion.ts); esto cubre a quien llama a la herramienta directo.
+      if (MARCADOR_SIN_REPONER.test(command) || MARCADOR_SIN_REPONER.test(String(params.stdin ?? ""))) throw new Error("No ejecuté la shell: quedó un marcador de secreto sin reponer en el comando o la entrada. El archivo del laboratorio debe recibir el valor real; revisá la procedencia de la clave.");
       if (command.length > 4000) throw new Error("El comando pasa los 4000 caracteres: partilo en dos llamadas");
       const cwd = insideProject(context.cwd, params.cwd ? String(params.cwd) : undefined);
       const verdict = classifyCommand(command, cwd);

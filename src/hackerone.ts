@@ -8,6 +8,7 @@ import { t } from "./idioma.ts";
 import { deleteSecret, readSecret, writeSecret } from "./secretos.ts";
 import { avisoDeCabeceras, textoDePolitica } from "./politica-cabeceras.ts";
 import { parseRule, scopeView, type ScopeRule, type ScopeStore } from "./scope.ts";
+import { extraerReglas, type ReglasPrograma } from "./reglas-programa.ts";
 
 const API = "https://api.hackerone.com/v1/hackers";
 const KEYRING = ["service", "elevate-cyber", "account", "hackerone"];
@@ -118,6 +119,7 @@ export interface ImportedScope {
   reference: ScopeRule[];
   skipped: string[];
   notes: string;
+  reglas: ReglasPrograma;
 }
 
 /** Un activo del alcance, venga de la API con token o del CSV público. */
@@ -141,6 +143,7 @@ const CODE_HOSTS = /^(?:www\.)?(github\.com|gitlab\.com|bitbucket\.org)$/i;
  * el operador lo vea. «https://*.dominio/» es un comodín.
  */
 export function translateAssets(assets: Asset[], handle: string): ImportedScope {
+  const reglas = extraerReglas(assets.map((asset, index) => ({ texto: asset.instruction, fuente: `HackerOne ${handle}, activo ${index + 1}` })));
   const include: ScopeRule[] = [];
   const exclude: ScopeRule[] = [];
   const reference: ScopeRule[] = [];
@@ -181,7 +184,7 @@ export function translateAssets(assets: Asset[], handle: string): ImportedScope 
       }
     }
   }
-  return { include, exclude, reference, skipped, notes: `Programa HackerOne «${handle}». Leé la política completa del programa antes de probar: este alcance es sólo la lista de activos.` };
+  return { include, exclude, reference, skipped, reglas, notes: `Programa HackerOne «${handle}». Leé la política completa del programa antes de probar: este alcance es sólo la lista de activos.` };
 }
 
 /** CSV (RFC 4180): comillas dobles, «""» como comilla y saltos de línea dentro de un campo. */
@@ -267,7 +270,7 @@ export function programLines(all: Program[], action?: string, search?: string): 
 export async function importScope(api: HackerOne | undefined, store: ScopeStore, handle: string, fetchImpl?: typeof fetch): Promise<string[]> {
   const imported = api ? await api.scope(handle) : await publicScope(handle, fetchImpl);
   if (!imported.include.length && !imported.reference.length) throw new Error(`El programa ${handle} no tiene activos de red elegibles en su alcance (ni código fuente).`);
-  const { saved, kept } = store.saveProgram({ source: `hackerone:${handle}`, include: imported.include, exclude: imported.exclude, notes: imported.notes, reference: imported.reference });
+  const { saved, kept } = store.saveProgram({ source: `hackerone:${handle}`, include: imported.include, exclude: imported.exclude, notes: imported.notes, reference: imported.reference, reglas: imported.reglas });
   return [
     `Alcance importado de HackerOne «${handle}»: ${imported.include.length} dentro, ${imported.exclude.length} excluidos${imported.reference.length ? `, ${imported.reference.length} de código fuente para leer con reference_read` : ""} (rev ${saved.rev}). Fuente: ${api ? "la API, con tu token" : "el CSV público del programa, sin token"}.`,
     ...(imported.reference.length ? ["Es de código abierto: antes de probar, leé lo reciente del repositorio (commits y PRs mergeados, CHANGELOG, roadmap, documentación) buscando regresiones, arreglos incompletos y funciones nuevas sin endurecer; la habilidad ingenieria-inversa dice cómo."] : []),

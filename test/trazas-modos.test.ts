@@ -101,15 +101,15 @@ test("modos: nombres, sinónimos de antes, lo desconocido restringe y gana el m�
   assert.equal(masRestrictivo("no", undefined), "no");
 });
 
-test("el modo local sale de la variable, si no de la configuración, si no compartir; la cuenta sólo restringe", () => {
+test("el modo local sale de la variable, si no de la configuración, si no «no»; la cuenta sólo restringe", () => {
   const prev = process.env.CYBER_TRAZAS;
   const config = process.env.CYBER_CONFIG!;
   try {
     delete process.env.CYBER_TRAZAS;
     rmSync(config, { force: true });
     anotarModoCuenta(undefined);
-    assert.deepEqual(modoLocal(), { modo: "compartir", origen: "defecto" });
-    assert.deepEqual(cabecerasDePrivacidad(), { "x-cyber-trazas": "compartir" }, "la cabecera va siempre, con el modo");
+    assert.deepEqual(modoLocal(), { modo: "no", origen: "defecto" });
+    assert.deepEqual(cabecerasDePrivacidad(), { "x-cyber-trazas": "no" }, "la cabecera va siempre, con el modo");
     writeFileSync(config, JSON.stringify({ providers: {}, idioma: "es" }));
     assert.equal(guardarModoTrazas("local"), undefined);
     assert.deepEqual(JSON.parse(leer(config)), { providers: {}, idioma: "es", trazas: "local" }, "no pisa el resto de la configuración");
@@ -133,8 +133,8 @@ test("el modo local sale de la variable, si no de la configuración, si no compa
   }
 });
 
-test("compartir: salen el turno y la trayectoria (tapados) con la cabecera, y no queda nada en la carpeta local", async () => {
-  const s = await sesion({});
+test("compartir (elegido): salen el turno y la trayectoria (tapados) con la cabecera, y no queda nada en la carpeta local", async () => {
+  const s = await sesion({ variable: "compartir" });
   try {
     assert.ok(s.pedidos.length > 0);
     assert.ok(s.pedidos.every((p) => p.trazas === "compartir"), JSON.stringify(s.pedidos.map((p) => [p.path, p.trazas])));
@@ -205,19 +205,19 @@ test("daemon: el aviso de la primera vez sale una sola vez, y en local cada sesi
     const primero = await connectDaemon(cwd, { spawn: false });
     const snap = await primero.attach({ session: "new" });
     const aviso = (snap.avisos ?? []).join("\n");
-    assert.match(aviso, /Compartir trazas viene activado/);
-    assert.match(aviso, /trayectorias y la cita/);
-    assert.match(aviso, /tapa las credenciales/);
+    assert.match(aviso, /Sin telemetría: no se guardan ni se comparten trazas/);
     assert.match(aviso, /\/datos local/);
+    assert.match(aviso, /\/datos compartir/);
     primero.close();
     const segundo = await connectDaemon(cwd, { spawn: false });
-    assert.doesNotMatch(((await segundo.attach({ session: "new" })).avisos ?? []).join("\n"), /viene activado/, "una sola vez");
+    assert.doesNotMatch(((await segundo.attach({ session: "new" })).avisos ?? []).join("\n"), /Sin telemetría/, "una sola vez");
     await segundo.ask("datos", { action: "modo", value: "local" });
     segundo.close();
     const tercero = await connectDaemon(cwd, { spawn: false });
     assert.match(((await tercero.attach({ session: "new" })).avisos ?? []).join("\n"), /Trazas en modo local: .*trazas/);
     const otorgado = await tercero.ask("consent", { value: `borrar-ajeno si «Autorizo borrar lo mío. token=DatoFicticio7382 ${PRIVADO}»` });
     assert.match(otorgado[0]!, /registrado/);
+    assert.match(otorgado[0]!, /sin cuenta de orobas no se envía/, "sin cuenta no sale ningún pedido");
     const dir = projectPaths(cwd).trazas;
     const [cita] = lineas(join(dir, "consentimientos.jsonl"));
     assert.equal(cita!.kind, "borrar-ajeno");

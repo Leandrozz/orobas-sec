@@ -105,6 +105,11 @@ export interface Finding {
   related?: FindingLink[];
   /** La escalada conocida de este hallazgo ya se intentó, quedó limitada o no aplica (src/cadenas.ts). */
   escalation?: Escalation;
+  /** Revisión de elegibilidad antes de invertir en el candidato. */
+  exclusionCercana?: string;
+  porQueNoAplica?: string;
+  /** Una pista fuera del modelo de confianza cierra la grieta correspondiente ante el control de cierre. */
+  fueraModeloConfianza?: string;
 }
 
 /** Un vínculo como lo manda el agente: el id (o prefijo) solo, o con su rol; «quitar» lo borra. */
@@ -122,6 +127,9 @@ export interface FindingInput {
   state?: string;
   /** Vínculos con otros hallazgos del proyecto (cadenas). */
   related?: LinkInput[];
+  exclusionCercana?: string;
+  porQueNoAplica?: string;
+  fueraModeloConfianza?: string;
 }
 
 export class Findings {
@@ -232,6 +240,7 @@ export class Findings {
     const evidence = this.evidence(input.evidence);
     if (state === "candidato" && !evidence.length) throw new Error("Un candidato necesita al menos un artefacto de evidencia. Sin evidencia, registralo como pista.");
     if (state === "candidato") this.rejectToolingClaim(input.title, input.summary, evidence);
+    if (state === "candidato" && input.fueraModeloConfianza?.trim()) throw new Error("Una hipótesis fuera del modelo de confianza se registra como pista, no como candidato.");
     const severity = (input.severity ?? "media") as Finding["severity"];
     if (!SEVERITIES.includes(severity)) throw new Error(`Severidad inválida. Usar: ${SEVERITIES.join(", ")}`);
     const same = this.list().find((item) => item.state !== "descartado" && item.asset === input.asset.trim() && item.kind === input.kind.trim().toLowerCase());
@@ -251,6 +260,9 @@ export class Findings {
       summary: input.summary.trim(),
       evidence,
       limits: input.limits?.trim() ?? "",
+      exclusionCercana: input.exclusionCercana?.trim() || undefined,
+      porQueNoAplica: input.porQueNoAplica?.trim() || undefined,
+      fueraModeloConfianza: input.fueraModeloConfianza?.trim() || undefined,
       decidedBy: "agente",
       decidedAt: now,
       reason: "",
@@ -352,6 +364,7 @@ export class Findings {
     const evidence = [...new Set([...current.evidence, ...this.evidence(change.evidence)])];
     if (state === "candidato" && !evidence.length) throw new Error("Un candidato necesita al menos un artefacto de evidencia.");
     if (state === "candidato") this.rejectToolingClaim(change.title?.trim() || current.title, change.summary?.trim() || current.summary, evidence);
+    if (state === "candidato" && (change.fueraModeloConfianza ?? current.fueraModeloConfianza)?.trim()) throw new Error("Una hipótesis fuera del modelo de confianza se registra como pista, no como candidato.");
     const related = this.links(current.related ?? [], change.related, current.id);
     let escalation = current.escalation;
     if (change.escalation !== undefined && String(change.escalation).trim()) {
@@ -370,6 +383,9 @@ export class Findings {
       severity: (change.severity as Finding["severity"]) ?? current.severity,
       summary: change.summary?.trim() || current.summary,
       limits: change.limits?.trim() ?? current.limits,
+      exclusionCercana: change.exclusionCercana?.trim() || current.exclusionCercana,
+      porQueNoAplica: change.porQueNoAplica?.trim() || current.porQueNoAplica,
+      fueraModeloConfianza: change.fueraModeloConfianza === undefined ? current.fueraModeloConfianza : change.fueraModeloConfianza.trim() || undefined,
       evidence,
       decidedBy: state === current.state ? current.decidedBy : "agente",
       decidedAt: state === current.state ? (current.decidedAt ?? current.updatedAt) : new Date().toISOString(),

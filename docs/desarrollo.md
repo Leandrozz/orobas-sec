@@ -51,7 +51,7 @@ El modelo `faux` (`-m faux`) simula respuestas, para probar sin proveedor ni gas
 Desde la raíz del repositorio:
 
 ```sh
-docker build -f distro/Dockerfile -t elevate-cyber .
+docker build -f distro/Dockerfile -t orobas-sec .
 ```
 
 La imagen parte de Node (fijada por digest), instala nmap, sqlmap y Chromium con `apt`, baja los binarios de httpx, nuclei, subfinder, katana, dnsx, ffuf, gitleaks, `gh`, `supabase`, `kubectl`, `aws`, jadx y apktool con la versión y la SHA-256 de `distro/fijados.txt` (el build falla si una suma no coincide), instala semgrep con cada dependencia fijada por suma y Playwright sin navegadores (usa el Chromium del sistema) desde su lockfile, copia `bin/`, `src/` y `distro/`, y corre como el usuario `node`. Para subir versiones: `scripts/actualizar-fijados.sh` y `scripts/semgrep-requisitos.sh` (ver [releases.md](releases.md)). El `ENTRYPOINT` es `bin/cyber -C /proyecto`. El comentario de uso al principio del Dockerfile muestra un `docker run` con solo `-v "$PWD:/proyecto"`: con eso el programa se niega a arrancar, porque faltan los montajes de datos y credenciales. Usá el lanzador, o agregá los dos montajes que el mensaje de error indica. Para probar el lanzador contra una imagen local, apuntalo con `CYBER_IMAGE`.

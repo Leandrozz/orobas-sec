@@ -75,10 +75,11 @@ test("cierre: nombra las grietas del tráfico, un hallazgo las cierra, y no obje
     assert.doesNotMatch(first.text, /seguir probando/i);
 
     // Un hallazgo sobre el recurso cierra su familia y sus hijos, en cualquier estado.
-    const finding = findings.record({ title: "PUT sobre item ajeno", kind: "control de acceso", asset: `${base}/api/items/2`, summary: "El PUT fue aceptado.", evidence: [], state: "pista" }, "s1");
+    const finding = findings.record({ title: "PUT sobre item ajeno", kind: "control de acceso", asset: `${base}/api/items/2`, summary: "El PUT fue aceptado, pero depende de comprometer una parte confiable.", evidence: [], state: "pista", fueraModeloConfianza: "The setup component is trusted and assumed honest." }, "s1");
     assert.ok(finding.id);
     const open = gate.open().map((crack) => crack.key);
     assert.ok(!open.some((key) => key.includes("/api/items/")), open.join(" | "));
+    assert.ok(!gate.objectionable().some((crack) => crack.path.startsWith("/api/items/")), "la pista marcada fuera del modelo no dispara una objeción para seguir");
     assert.ok(open.includes("escritura-sobre-negado:POST /api/secret"));
 
     // Cada grieta se objeta dos veces como mucho (sin intentarla) y después se deja cerrar, pero sigue abierta para el aviso.

@@ -159,7 +159,7 @@ test("mcp: flujos del menú", async () => {
   assert.equal((await findCommand("mcp")!.run(fakeIO({}).io, "cualquiercosa"))?.tone, "warn");
 });
 
-test("ayuda: teclas primero y los 17 visibles, con los miembros de cada grupo debajo", () => {
+test("ayuda: teclas primero y los comandos visibles, con los miembros de cada grupo debajo", () => {
   const panel = helpPanel(["Enter envía"]);
   assert.equal(panel.lines[0], "Enter envía");
   const at = panel.lines.findIndex((line) => /^ {2}\/conexiones +/.test(line));
@@ -483,5 +483,5 @@ test("menú de grupo: escribir una letra salta a la fila cuya etiqueta, sin la �
 });
 
 test("conexiones: hijos en el orden de la tabla (nubes primero)", () => {
-  assert.deepEqual(hijos("conexiones").map((h) => h.name), [...PLATFORM_NAMES, "orobas", "hackerone", "h1", "correo", "navegador"]);
+  assert.deepEqual(hijos("conexiones").map((h) => h.name), [...PLATFORM_NAMES, "orobas", "chatgpt", "hackerone", "h1", "correo", "navegador"]);
 });

@@ -75,10 +75,11 @@ const read = (name: string): { plano?: string; iv?: string; tag?: string; data?:
   }
 };
 
-export function writeSecret(name: string, value: string): { encrypted: boolean; path: string } {
+export function writeSecret(name: string, value: string, options: { requireEncryption?: boolean } = {}): { encrypted: boolean; path: string } {
   const before = read(name);
   const wasEncrypted = typeof before?.iv === "string";
   const key = secretsKey(!wasEncrypted); // sobre un cifrado no se inventa una llave nueva
+  if (options.requireEncryption && !key) throw new Error(t("Necesito el llavero o CYBER_SECRETS_KEY para guardar esta sesión cifrada.", "A keyring or CYBER_SECRETS_KEY is required to store this session encrypted."));
   // Un archivo cifrado sin llave no se pisa con texto plano: se perdería sin remedio.
   if (wasEncrypted && !key) throw lockedError();
   let body: object = { v: 1, plano: value };

@@ -182,3 +182,35 @@ export async function platformMenu(name: string, label: string, io: Pick<Account
   const sure = await io.pick(t(`¿Revocar ${label}?`, `Revoke ${label}?`), [t("Sí, revocar", "Yes, revoke"), t("Cancelar", "Cancel")]);
   return sure === 0 ? io.ask("platform_account", { name, action: "revoke" }) : [];
 }
+
+/** El navegador autoriza; la URL se muestra también para máquinas sin escritorio. */
+export interface ChatgptIO extends Pick<AccountIO, "ask" | "pick"> {
+  notice?: (lines: string[], waiting?: boolean) => void;
+}
+async function chatgptNotice(io: ChatgptIO): Promise<boolean> {
+  const [state, ...lines] = await io.ask("chatgpt", { action: "notice" });
+  if (state !== "pendiente") return true;
+  io.notice?.(lines);
+  const choice = await io.pick("Términos de OpenAI", ["Continue with ChatGPT", "Cancelar"]);
+  if (choice !== 0) return false;
+  await io.ask("chatgpt", { action: "accept_notice" });
+  return true;
+}
+async function chatgptSignIn(io: ChatgptIO, add = false): Promise<string[]> {
+  if (!(await chatgptNotice(io))) return [];
+  io.notice?.(await io.ask("chatgpt", { action: add ? "add" : "start" }), true);
+  return io.ask("chatgpt", { action: "wait" });
+}
+export const chatgptLogin = (io: ChatgptIO) => chatgptSignIn(io);
+export async function chatgptMenu(io: ChatgptIO): Promise<string[]> {
+  const state = JSON.parse((await io.ask("chatgpt", { action: "state" }))[0] ?? "{}") as { accounts?: Array<{ clientId: string; email?: string; active: boolean }>; linked?: boolean };
+  const rows = ["Ver estado y uso", "Continue with ChatGPT", "Agregar otra cuenta", ...(state.accounts ?? []).filter((item) => !item.active).map((item) => "Usar " + (item.email ?? item.clientId)), "Salir de ChatGPT"];
+  const choice = await io.pick("ChatGPT", rows);
+  if (choice === undefined) return [];
+  if (choice === 0) return io.ask("chatgpt", { action: "status" });
+  if (choice === 1) return chatgptSignIn(io);
+  if (choice === 2) return chatgptSignIn(io, true);
+  const other = (state.accounts ?? []).filter((item) => !item.active);
+  if (choice < 3 + other.length) return io.ask("chatgpt", { action: "switch", clientId: other[choice - 3]!.clientId });
+  return io.ask("chatgpt", { action: "logout" });
+}

@@ -34,6 +34,7 @@ import { generateReport, parseReportLang, reportSavedLines } from "./report.ts";
 import type { Message } from "./llm.ts";
 import { usd, usdToPico } from "./money.ts";
 import { configPath, apiKey, orobasBaseUrl, type Provider, resolveProvider } from "./providers.ts";
+import { chatgptOp, chatgptState } from "./chatgpt.ts";
 import { isSubscription } from "./cuenta.ts";
 import { backupOnNewVersion, lockProject, migrateLegacy, registerProject, runtimeDir, sharedFolderWarning } from "./datos.ts";
 import { logEvent, openStore, projectPaths } from "./store.ts";
@@ -57,6 +58,7 @@ import { fileURLToPath } from "node:url";
 import { chromeBridge, extCmd, extensionGuide, readSeenMarker, type ChromeBridge } from "./chrome.ts";
 import { BrowserAccess, browserLines } from "./navegador.ts";
 import { CabecerasPrograma, leerCabecera, lineasCabeceras } from "./cabeceras-programa.ts";
+import { diagnosticarMejoras, redactarConModelo } from "./mejoras.ts";
 
 /** El cambio ya rige en esta sesión; si no se pudo guardar, el error lo dice. */
 function guardarMcp(servers: Parameters<typeof writeMcpConfig>[0]): void {
@@ -89,6 +91,8 @@ export function buildId(): string {
 }
 
 export interface Status {
+  /** Pie de la TUI cuando el modelo usa el plan de ChatGPT. */
+  chatgptPlan?: string;
   running: boolean;
   interrupted: boolean;
   usage: string;
@@ -197,6 +201,7 @@ class Host {
 
   status(): Status {
     const { engine } = this;
+    const chatgpt = engine.agent.model.provider === "chatgpt" ? chatgptState() : undefined;
     return {
       running: engine.agent.running,
       interrupted: engine.interrupted,
@@ -206,6 +211,7 @@ class Host {
       notes: engine.vault.count(),
       model: `${engine.agent.model.provider}/${engine.agent.model.id}`,
       profile: engine.profile.current(),
+      ...(chatgpt ? { chatgptPlan: !chatgpt.linked ? "ChatGPT · desconectado · /chatgpt" : chatgpt.limitReached ? "ChatGPT · límite alcanzado · /chatgpt" : "Using ChatGPT plan · /chatgpt" } : {}),
       queued: engine.queue.length,
       ...(engine.queue.length ? { queue: engine.queue.map((text) => ({ text: text.replace(/\n\n<terminal>[\s\S]*$/, "").replace(/\s+/g, " ").trim().slice(0, 200), key: queueKey(text) })) } : {}),
       ...(this.thinking ? { thinking: this.thinking } : {}),
@@ -1047,8 +1053,12 @@ export class Daemon {
           catch { /* el consentimiento vale igual: está en la base del proyecto */ }
         }
         let resultado: string;
-        try {
-          resultado = `enviado a los servidores: ${await sendConsent(kind, quote, saved.hash, saved.at, process.env.OROBAS_API_KEY, fetch, { tapar })}`;
+        // Sin cuenta de orobas no hay a quién mandarlo: queda sólo en la base del proyecto, sin ningún pedido de red.
+        // (Antes salía igual, con «Bearer undefined», y fallaba.)
+        const clave = apiKey("OROBAS_API_KEY");
+        if (!clave) resultado = "sólo local: sin cuenta de orobas no se envía a ningún servidor";
+        else try {
+          resultado = `enviado a los servidores: ${await sendConsent(kind, quote, saved.hash, saved.at, clave, fetch, { tapar })}`;
           store.markSent(kind, resultado);
         } catch (error) {
           resultado = `sólo local, sin enviar (fallo: ${String(error).slice(0, 120)}); se reintenta con el próximo /consent`;
@@ -1076,6 +1086,14 @@ export class Daemon {
       }
       case "view": {
         const arg = String(request.arg ?? "");
+        if (request.name === "mejoras") {
+          const words = arg.split(/\s+/).filter(Boolean);
+          const wanted = words.find((word) => /^\d+$/.test(word));
+          if (words.some((word) => word !== wanted && word !== "modelo")) throw new Error("Uso: cyber mejoras [1..100] [--modelo]");
+          const report = diagnosticarMejoras(this.db, this.options.cwd, wanted ? Number(wanted) : 10);
+          if (!words.includes("modelo") || report.modo === "no" || !report.patrones.length) return report.lineas;
+          return [...report.lineas, "", "REDACCIÓN OPTATIVA DEL MODELO FUERTE", await redactarConModelo(report, this.options.cwd)];
+        }
         if (request.name === "cobertura") {
           const engine = host?.engine;
           if (!engine) return ["Sin sesión abierta: la cobertura se mira desde una sesión (cyber -c)."];
@@ -1128,6 +1146,13 @@ export class Daemon {
           const [verb, ...rules] = arg.split(/[\s,]+/).filter(Boolean);
           if (verb === "sesiones" || verb === "proyecto" || verb === "todos") return this.scopeSessions(host?.engine.sessionId);
           const { store, label } = this.scopeFor(request, host);
+          if (verb === "reglas") {
+            const [, clase, ...palabras] = arg.split(/\s+/);
+            const tipo = ({ exclusion: "exclusiones", honesto: "honestos", atacante: "posicionAtacante" } as const)[clase as "exclusion" | "honesto" | "atacante"];
+            if (tipo) store.agregarRegla(tipo, palabras.join(" "), "operador: /alcance reglas");
+            else if (clase) throw new Error("Uso: /alcance reglas [exclusion|honesto|atacante] <cita textual>");
+            return [...(label ? [label] : []), ...scopeView(store.current())];
+          }
           if (verb === "add" || verb === "agregar") store.edit({ include: rules });
           else if (verb === "excluir") store.edit({ exclude: rules });
           else if (verb === "quitar") store.edit({ remove: rules });
@@ -1150,6 +1175,11 @@ export class Daemon {
         return this.account(request);
       case "mail_account":
         return this.mailAccount(request);
+      case "chatgpt": {
+        const lines = await chatgptOp(request);
+        for (const live of this.hosts.values()) live.broadcast({ ev: "status", status: live.status() });
+        return lines;
+      }
       case "platform_account":
         return this.platformAccount(request, send);
       case "confirm": {

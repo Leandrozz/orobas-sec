@@ -53,7 +53,7 @@ async function sesion(cerebro: Cerebro, alcance: () => string[], formato: Format
   process.env.CYBER_CONFIG = join(dir, "config.json");
   process.env.OROBAS_API_KEY = "oro_prueba_punta_a_punta_1";
   process.env.CYBER_SHELL_AUTOAPROBAR = "1";
-  delete process.env.CYBER_TRAZAS;
+  process.env.CYBER_TRAZAS = "compartir"; // estas pruebas miran lo que sale al compartir, que se elige a mano
   const registro = join(dir, "escaneres.jsonl");
   writeFileSync(registro, "");
   mkdirSync(join(dir, "bin"));

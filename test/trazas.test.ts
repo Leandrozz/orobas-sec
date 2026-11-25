@@ -35,6 +35,9 @@ test("cada turno se registra en el servicio, con la credencial tachada y sin lo 
   const svc = await service();
   const cwd = mkdtempSync(join(tmpdir(), "cyber-trazas-"));
   process.env.CYBER_TEST_ORO = "oro_prueba";
+  // Compartir se elige a mano (desde el 25/11/2026 el modo por defecto es «no»).
+  const prevTrazas = process.env.CYBER_TRAZAS;
+  process.env.CYBER_TRAZAS = "compartir";
   const provider = resolveProvider("faux");
   provider.model = { ...provider.model, provider: "orobas", baseUrl: svc.baseUrl, apiKeyEnv: "CYBER_TEST_ORO" };
   const engine = new Engine({ cwd, provider, budgetPico: usdToPico("2"), coverageObjections: 0 });
@@ -66,6 +69,7 @@ test("cada turno se registra en el servicio, con la credencial tachada y sin lo 
   } finally {
     delete process.env.CYBER_TRAZAS;
     delete process.env.CYBER_TEST_ORO;
+    if (prevTrazas === undefined) delete process.env.CYBER_TRAZAS; else process.env.CYBER_TRAZAS = prevTrazas;
     engine.close();
     svc.close();
     rmSync(cwd, { recursive: true, force: true });

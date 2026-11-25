@@ -1,13 +1,13 @@
 // Trazas: todo el material de entrenamiento que puede dejar una sesión. Son la traza del gateway (cada
 // pedido al modelo y su respuesta), el registro de cada turno (/traces), la trayectoria de cada sesión
-// (/trayectorias) y la cita de los consentimientos (/consent). Un solo modo, el mismo que en la web
-// (decisión de Lean, 22/11/2026):
-//   · compartir (por defecto): todo se manda al servicio, con los secretos ya tapados.
+// (/trayectorias) y la cita de los consentimientos (/consent). Un solo modo, el mismo que en la web.
+// Nada se comparte ni se guarda si la persona no lo elige (decisión de Lean, 25/11/2026; antes venía «compartir»):
+//   · no (por defecto): nada de contenido sale y no se arma material de entrenamiento; queda sólo lo que la
+//     sesión necesita para funcionar y retomarse.
 //   · local: nada de contenido sale hacia el servicio; el material completo, tapado igual que si saliera,
 //     queda en la PC de la persona (trazas-locales.ts).
-//   · no: nada de contenido sale y no se arma material de entrenamiento; queda sólo lo que la sesión
-//     necesita para funcionar y retomarse.
-// El modo local sale de CYBER_TRAZAS, si no de «trazas» en la configuración, si no «compartir». Si el
+//   · compartir: todo se manda al servicio, con los secretos ya tapados (sólo con el proveedor orobas).
+// El modo local sale de CYBER_TRAZAS, si no de «trazas» en la configuración, si no «no». Si el
 // servicio informa el modo de la cuenta (GET /cuenta) y es más restrictivo, gana ése. Lo que no se
 // entiende restringe. En todos los modos el pedido igual viaja al proveedor del modelo: eso no cambia.
 // La preferencia se consulta en cada envío, también si cambia durante la sesión.
@@ -19,6 +19,8 @@ import { t } from "./idioma.ts";
 export const MODOS_TRAZAS = ["compartir", "local", "no"] as const;
 export type ModoTrazas = (typeof MODOS_TRAZAS)[number];
 const RANGO: Record<ModoTrazas, number> = { compartir: 0, local: 1, no: 2 };
+/** Sin elección de la persona no se comparte ni se guarda nada. */
+export const MODO_POR_DEFECTO: ModoTrazas = "no";
 
 /** Interpreta un valor. Acepta los de antes (no/0/false/off/cantidades, y sí/1/on/completa). Vacío: nada; otro: «no». */
 export function leerModo(valor: unknown): ModoTrazas | undefined {
@@ -58,7 +60,7 @@ export function modoLocal(): { modo: ModoTrazas; origen: Origen } {
   if (variable) return { modo: variable, origen: "variable" };
   const config = modoDeConfig();
   if (config) return { modo: config, origen: "configuración" };
-  return { modo: "compartir", origen: "defecto" };
+  return { modo: MODO_POR_DEFECTO, origen: "defecto" };
 }
 
 let cuenta: ModoTrazas | undefined;
@@ -102,23 +104,4 @@ export function guardarModoTrazas(modo: ModoTrazas): string | undefined {
   const variable = leerModo(process.env.CYBER_TRAZAS);
   if (variable && variable !== modo) return `Quedó guardado, pero la variable CYBER_TRAZAS=${process.env.CYBER_TRAZAS} manda en este proceso: rige «${variable}» hasta que la saques.`;
   return undefined;
-}
-
-/**
- * Antes de los tres modos, «/datos revocar» dejaba en la base del proyecto un consentimiento «trayectorias-no». Esa
- * revocación sigue valiendo (decisión de Lean del 22/11: compartir viene activado, pero quien lo había apagado lo
- * sigue teniendo apagado). Si esta máquina no eligió un modo (ni CYBER_TRAZAS ni «trazas» en la configuración) y el
- * último registro del proyecto es esa revocación, queda «no» en la configuración, una sola vez, y devuelve el aviso.
- * Un permiso posterior («trayectorias», que deja /datos compartir) la deja sin efecto. Un modo ya elegido manda.
- */
-export function respetarRevocacionAnterior(consentimientos: { get(kind: string): { at: string } | undefined }): string | undefined {
-  if (modoLocal().origen !== "defecto") return undefined;
-  const revoco = consentimientos.get("trayectorias-no")?.at;
-  const permiso = consentimientos.get("trayectorias")?.at;
-  if (!revoco || (permiso && Date.parse(permiso) >= Date.parse(revoco))) return undefined;
-  const problema = guardarModoTrazas("no");
-  return t(
-    `Habías revocado con /datos el permiso de compartir datos de este proyecto: las trazas quedan en «no» (guardado en la configuración, vale para toda la máquina).${problema ? ` ${problema}` : ""} Para compartir: /datos compartir.`,
-    `You had revoked data sharing for this project with /datos: traces stay at “no” (saved in the settings, for the whole machine).${problema ? ` ${problema}` : ""} To share: /datos compartir.`,
-  );
 }
