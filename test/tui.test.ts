@@ -129,19 +129,19 @@ test("foco sobre el daemon: conversación, comandos, salida y vuelta a un turno 
     // La lista de / tapa el pie y se recorre con ↑↓ (vuelve al final desde el primero).
     const mark = first.state.written.length;
     first.state.input("/");
-    assert.match(stripAnsi(first.state.written.slice(mark)), /\/clear \(\/limpiar\) +Limpiar/);
+    assert.match(stripAnsi(first.state.written.slice(mark)), /\/sesiones \(\/resume\) +Sesiones del proyecto/);
     assert.doesNotMatch(stripAnsi(first.state.written.slice(mark)), /Enter enviar/);
     first.state.input("\x1b[B\x1b[B\x1b[A\x1b[B\t");
-    assert.match(first.plain(), /› \/memory \s/);
+    assert.match(first.plain(), /› \/informe \s/);
     first.state.input("\x03");
     // Un alias en el otro idioma también aparece en la lista, con su par entre paréntesis, y Tab completa lo tipeado.
     first.state.input("/lang");
-    assert.match(first.plain(), /\/lang \(\/idioma\) +Idioma de la interfaz/);
+    assert.match(first.plain(), /\/lang \(\/idioma\) +En \/config · Idioma de la interfaz/);
     first.state.input("\t");
     assert.match(first.plain(), /› \/lang \s/);
     first.state.input("\x03");
     first.state.input("/cos");
-    assert.match(first.plain(), /\/costos \(\/cost\) +Detalle del gasto/);
+    assert.match(first.plain(), /\/costos \(\/cost\) +En \/limites · Detalle del gasto/);
     assert.match(first.plain(), /╭─ Comandos/);
     // En conhost la fuente no tiene esquinas redondeadas.
     process.env.CYBER_CONSOLE = "conhost";

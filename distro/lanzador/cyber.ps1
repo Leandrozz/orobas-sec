@@ -213,8 +213,9 @@ function ActualizarLanzador($conSi) {
     Write-Host (t 'Sin consola no reemplazo el lanzador (sólo actualizo la imagen). Para hacerlo igual: cyber --actualizar --si' 'Without a console I do not replace the launcher (only the image). To do it anyway: cyber --actualizar --si')
     return
   }
-  if ($ClavePublica -match 'REEMPLAZAR') {
-    Write-Host (t 'Este lanzador es una copia de desarrollo (sin la clave de los releases): no se reemplaza solo. Instalá uno de un release (README).' 'This launcher is a development copy (no release key): it does not replace itself. Install one from a release (README).')
+  # Copia de desarrollo: no la completó un release (o le falta la clave). Reemplazarla pisaría el archivo del repo.
+  if (-not $VersionLanzador -or $ClavePublica -match 'REEMPLAZAR') {
+    Write-Host (t 'Este lanzador es una copia de desarrollo (no viene de un release): no se reemplaza solo. Instalá uno de un release (README).' 'This launcher is a development copy (not from a release): it does not replace itself. Install one from a release (README).')
     return
   }
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12

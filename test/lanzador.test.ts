@@ -266,13 +266,13 @@ test("lanzador: --actualizar sin terminal hace pull sin preguntar y no se reempl
   assert.equal(readFileSync(copia, "utf8"), readFileSync(LANZADOR, "utf8"));
 });
 
-test("lanzador: una copia de desarrollo (sin la clave de los releases) no se reemplaza ni con --si, y la imagen igual se actualiza", () => {
+test("lanzador: una copia de desarrollo (no viene de un release) no se reemplaza ni con --si, y la imagen igual se actualiza", () => {
   const e = entorno({});
   const copia = join(e.t, "cyber");
   copyFileSync(LANZADOR, copia);
   const r = e.correr(["--actualizar", "--si"], "", copia);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stderr, /copia de desarrollo \(sin la clave de los releases\): no se reemplaza solo/);
+  assert.match(r.stderr, /copia de desarrollo \(no viene de un release\): no se reemplaza solo/);
   assert.match(e.leer("log"), /^pull /m);
   assert.equal(readFileSync(copia, "utf8"), readFileSync(LANZADOR, "utf8"));
 });

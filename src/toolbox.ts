@@ -394,7 +394,9 @@ export function createNetTools(context: NetContext): Tool[] {
     execute: async (params, signal) => {
       if (!params.url.includes("FUZZ")) throw new Error("La URL debe contener FUZZ");
       authorizeAll(scope(), [params.url.replace("FUZZ", "fuzz")], context.http);
-      const argv = [need("ffuf"), "-u", plain(params.url, "url"), "-of", "json", "-o", "/dev/stdout", "-s", "-rate", String(conductFor(context, "ffuf", params.rate ?? 20).rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, "-mc", plain(params.matchCodes ?? "200,204,301,302,307,401,403", "matchCodes")];
+      // El permiso del programa antes que el binario: «apagado» le dice al agente más que «no está instalado».
+      const ritmo = conductFor(context, "ffuf", params.rate ?? 20).rate;
+      const argv = [need("ffuf"), "-u", plain(params.url, "url"), "-of", "json", "-o", "/dev/stdout", "-s", "-rate", String(ritmo), "-H", `User-Agent: ${context.http.conduct().userAgent}`, "-mc", plain(params.matchCodes ?? "200,204,301,302,307,401,403", "matchCodes")];
       let stdin: string | undefined;
       if (params.words?.length) {
         if (params.words.length > 2000) throw new Error("Máximo 2000 palabras inline");
@@ -465,7 +467,9 @@ export function createNetTools(context: NetContext): Tool[] {
     parameters: obj({ targets: list(str()), headers: HEADERS, timeoutSec: int({ minimum: 10, maximum: 1800 }) }, ["targets"]),
     execute: async (params, signal) => {
       authorizeAll(scope(), params.targets, context.http);
-      const argv = [need("httpx"), "-silent", "-duc", "-json", "-title", "-status-code", "-tech-detect", "-server", "-rate-limit", String(conductFor(context, "httpx").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http)];
+      // El permiso del programa antes que el binario: «apagado» le dice al agente más que «no está instalado».
+      const ritmo = conductFor(context, "httpx").rate;
+      const argv = [need("httpx"), "-silent", "-duc", "-json", "-title", "-status-code", "-tech-detect", "-server", "-rate-limit", String(ritmo), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http)];
       const result = await run(context, "httpx", argv, signal, (params.timeoutSec ?? SCAN_SECONDS) * 1000, params.targets.map((target: string) => plain(target, "target")).join("\n"));
       const rows = jsonLines(result.stdout).map((row) => ({ url: row.url, status: row.status_code, titulo: (row.title ?? "").slice(0, 60), servidor: row.webserver ?? "", tech: (row.tech ?? []).join("+") }));
       return finish(`${rows.length ? encode({ vivos: rows }) : "Ningún host respondió."}\n${result.status} · artefacto ${result.artifact}`, { vivos: rows.length, artefacto: result.artifact });
@@ -489,7 +493,9 @@ export function createNetTools(context: NetContext): Tool[] {
     ),
     execute: async (params, signal) => {
       authorizeAll(scope(), params.targets, context.http);
-      const argv = [need("nuclei"), "-silent", "-jsonl", ...(hayFijas(context.http) ? ["-disable-redirects"] : []), "-disable-update-check", "-rate-limit", String(conductFor(context, "nuclei").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, "-severity", plain(params.severity ?? "medium,high,critical", "severity")];
+      // El permiso del programa antes que el binario: «apagado» le dice al agente más que «no está instalado».
+      const ritmo = conductFor(context, "nuclei").rate;
+      const argv = [need("nuclei"), "-silent", "-jsonl", ...(hayFijas(context.http) ? ["-disable-redirects"] : []), "-disable-update-check", "-rate-limit", String(ritmo), "-H", `User-Agent: ${context.http.conduct().userAgent}`, "-severity", plain(params.severity ?? "medium,high,critical", "severity")];
       if (params.tags) argv.push("-tags", plain(params.tags, "tags"));
       if (params.templates) argv.push("-t", plain(params.templates, "templates"));
       argv.push(...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http));
@@ -522,7 +528,9 @@ export function createNetTools(context: NetContext): Tool[] {
       authorizeAll(scope(), [params.url], context.http);
       const origen = new URL(params.url).origin;
       const patronOrigen = `^${origen.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/|$)`;
-      const argv = [need("katana"), "-silent", "-duc", "-jsonl", "-u", plain(params.url, "url"), "-d", String(params.depth ?? 2), "-rate-limit", String(conductFor(context, "katana").rate), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http), "-field-scope", "fqdn", ...(hayFijas(context.http) ? ["-crawl-scope", patronOrigen, "-disable-redirects"] : [])];
+      // El permiso del programa antes que el binario: «apagado» le dice al agente más que «no está instalado».
+      const ritmo = conductFor(context, "katana").rate;
+      const argv = [need("katana"), "-silent", "-duc", "-jsonl", "-u", plain(params.url, "url"), "-d", String(params.depth ?? 2), "-rate-limit", String(ritmo), "-H", `User-Agent: ${context.http.conduct().userAgent}`, ...scannerHeaderArgs(context.http, params.headers), ...fixedHeaderArgs(context.http), "-field-scope", "fqdn", ...(hayFijas(context.http) ? ["-crawl-scope", patronOrigen, "-disable-redirects"] : [])];
       const result = await run(context, "katana", argv, signal, (params.timeoutSec ?? SCAN_SECONDS) * 1000);
       const urls = [...new Set(jsonLines(result.stdout).map((row) => row.request?.endpoint ?? row.endpoint).filter(Boolean))];
       const inside = urls.filter((url) => decide(scope(), url).allowed);

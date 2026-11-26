@@ -47,6 +47,10 @@ test("inicio guiado: siete pasos sobre el sello, deja alcance y marca hecho; /in
     await until(() => plain().includes("Paso 4 de 7"), 60_000); // revisa cada binario de la caja: tarda
     assert.match(plain(), /Herramientas/);
     state.input("\r");
+    // Si faltan herramientas instalables (un runner limpio), aparece «Descargar herramientas» con descargar marcado:
+    // la prueba nunca instala nada, elige «seguir sin descargar».
+    await until(() => plain().includes("Paso 5 de 7") || plain().includes("seguir sin descargar"));
+    if (!plain().includes("Paso 5 de 7")) state.input("\x1b[B\r");
     await until(() => plain().includes("Paso 5 de 7"));
     assert.match(plain(), /chrome:\/\/extensions/);
     state.input("\r");

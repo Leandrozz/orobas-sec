@@ -34,7 +34,7 @@ async function armar(conHarness = false, pestanas?: Parameters<typeof guardarPes
   const output = { write: (data: string) => void (state.written += data), columns, rows: 30 };
   const client = await connectDaemon(cwd, { spawn: false });
   const snapshot = await client.attach({ session: "new" });
-  startFoco(client, snapshot, {
+  const foco = startFoco(client, snapshot, {
     project: cwd,
     io: { output, listen: (onData) => ((state.input = onData), () => {}) },
     onExit: () => client.close(),
@@ -51,7 +51,9 @@ async function armar(conHarness = false, pestanas?: Parameters<typeof guardarPes
   const t_visible = visible;
   /** Abre la lista y elige la fila `n` (bajando desde «+ nueva»). */
   const elegir = async (n: number, espera = /sub:1 · (?:terminó|finished)/) => { state.input(F2); await tick(); state.input("\x1b[H" + "\x1b[B".repeat(n) + "\r"); await until(() => espera.test(visible())); };
-  return { state, daemon, provider, client, visible, conSub, marca, elegir, cwd };
+  /** Cierra la TUI antes que el daemon: si queda abierta, su animación mantiene vivo el proceso de pruebas. */
+  const cerrar = () => { foco.exit(); daemon.close(); };
+  return { state, daemon, provider, client, visible, conSub, marca, elegir, cwd, cerrar };
 }
 
 test("ia: la lista muestra los subagentes de una sesión abierta con ✓ al terminar", async () => {
@@ -61,7 +63,7 @@ test("ia: la lista muestra los subagentes de una sesión abierta con ✓ al term
     t.state.input(F2);
     await until(() => /✓ sub:1 · revisar/.test(t.visible()));
     assert.match(t.visible(), /✓ sub:1 · revisar/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: elegir un subagente en la lista pone la fuente en la ventana activa; elegir una pestaña la saca", async () => {
@@ -77,7 +79,7 @@ test("ia: elegir un subagente en la lista pone la fuente en la ventana activa; e
     t.state.input("\x1b[A\r"); // vuelve a la fila de la pestaña Chat
     await until(() => !/sub:1 · (?:terminó|finished)/.test(t.visible()));
     assert.doesNotMatch(t.visible(), /sub:1 · (?:terminó|finished)/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: la lista muestra los harnesses que devuelve orquesta", async () => {
@@ -87,7 +89,7 @@ test("ia: la lista muestra los harnesses que devuelve orquesta", async () => {
     await until(() => /⋯ #a3f claude/.test(t.visible()));
     assert.match(t.visible(), /⋯ #a3f claude/);
     assert.doesNotMatch(t.visible(), /\/ultra · harnesses/); // vivo: va debajo de su sesión, no en el grupo de anteriores
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: Alt+N con una fuente puesta vuelve a la pestaña", async () => {
@@ -98,7 +100,7 @@ test("ia: Alt+N con una fuente puesta vuelve a la pestaña", async () => {
     t.state.input("\x1b1");
     await until(() => t.marca() === 0);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: elegir una sesión en la lista sobre una ventana con fuente la borra", async () => {
@@ -111,7 +113,7 @@ test("ia: elegir una sesión en la lista sobre una ventana con fuente la borra",
     t.state.input("\x1b[A\x1b[A\r"); // sub:1 → Chat → sesión
     await until(() => t.marca() === 0);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: /clear con una fuente puesta la borra", async () => {
@@ -122,7 +124,7 @@ test("ia: /clear con una fuente puesta la borra", async () => {
     t.state.input("/clear\r");
     await until(() => t.marca() === 0);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: mover la pestaña borra la fuente del origen y la del destino", async () => {
@@ -137,7 +139,7 @@ test("ia: mover la pestaña borra la fuente del origen y la del destino", async 
     t.state.input("\x1b[1;6C"); // Ctrl+Shift+→ desde la ventana 2: la mueve a la 1
     await until(() => t.marca() === 0);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: la ventana de subagente muestra objetivo, texto y acciones, y al terminar informe y ✓", async () => {
@@ -150,7 +152,7 @@ test("ia: la ventana de subagente muestra objetivo, texto y acciones, y al termi
     assert.match(t.visible(), /(?:Informe|Report):/);
     assert.match(t.visible(), /✓ sub:1 · (?:terminó|finished)/);
     assert.match(t.visible(), /solicitud/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: al arrancar un subagente aparece el aviso; el borrador y la ventana activa no cambian", async () => {
@@ -163,7 +165,7 @@ test("ia: al arrancar un subagente aparece el aviso; el borrador y la ventana ac
     assert.match(t.visible(), /sub:1 (?:arrancó \(F2 para verlo|started \(F2 to see it)\)/);
     assert.match(t.visible(), /borrador-xyz/);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: dos ventanas con el mismo subagente se actualizan las dos", async () => {
@@ -178,7 +180,7 @@ test("ia: dos ventanas con el mismo subagente se actualizan las dos", async () =
     (t.client as unknown as { emit(e: object): void }).emit({ type: "text", worker: "sub:1", delta: "novedad en vivo" });
     await until(() => (t.visible().match(/novedad en vivo/g) ?? []).length === 2);
     assert.equal((t.visible().match(/novedad en vivo/g) ?? []).length, 2);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: con una fuente a la vista, Alt+↑ no opera sobre la pestaña oculta", async () => {
@@ -188,7 +190,7 @@ test("ia: con una fuente a la vista, Alt+↑ no opera sobre la pestaña oculta",
     await t.elegir(3);
     t.state.input("\x1b[1;3A"); await tick(100);
     assert.doesNotMatch(t.visible(), /elegir acci|pick action/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: el título de un subagente trabajando no repite el ● de la ventana activa", async () => {
@@ -199,7 +201,7 @@ test("ia: el título de un subagente trabajando no repite el ● de la ventana a
     t.state.input(F2); await tick(); t.state.input("\x1b[H" + "\x1b[B".repeat(3) + "\r");
     await until(() => /sub:2 · (?:trabajando|working)/.test(t.visible()));
     assert.match(t.visible(), /● ⋯ sub:2 · (?:trabajando|working)/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: sin delegate, con una ventana, nada cambia", async () => {
@@ -210,7 +212,7 @@ test("ia: sin delegate, con una ventana, nada cambia", async () => {
     await tick(200);
     assert.doesNotMatch(t.visible(), /arrancó|started|Objetivo:|Goal:|Informe:|Report:/);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: cambiar las pestañas desde /config con una fuente puesta la borra", async () => {
@@ -224,7 +226,7 @@ test("ia: cambiar las pestañas desde /config con una fuente puesta la borra", a
     t.state.input("\x1b[B\r"); // alterna un tipo de contenido: aplica la lista
     await until(() => t.marca() === 0);
     assert.equal(t.marca(), 0);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 // --- Ventana de harness y sondeo ---
@@ -250,7 +252,7 @@ async function armarH(ver: () => string[], lista: (sesion: number) => string[] |
   const output = { write: (data: string) => void (state.written += data), columns: 120, rows: 30 };
   const client = await connectDaemon(cwd, { spawn: false });
   const snapshot = await client.attach({ session: "new" });
-  startFoco(client, snapshot, {
+  const foco = startFoco(client, snapshot, {
     project: cwd,
     io: { output, listen: (onData) => ((state.input = onData), () => {}) },
     onExit: () => client.close(),
@@ -263,7 +265,7 @@ async function armarH(ver: () => string[], lista: (sesion: number) => string[] |
   const avanzar = async () => { mock.timers.tick(3000); await tick(80); };
   const lista3 = async () => { state.input(F2); await until(() => listas() > 0); await tick(40); };
   const abrir = async () => { await lista3(); state.input("\x1b[H" + "\x1b[B".repeat(3) + "\r"); await until(() => vers() > 0); await tick(40); };
-  const cerrar = () => { mock.timers.reset(); mock.restoreAll(); daemon.close(); };
+  const cerrar = () => { foco.exit(); mock.timers.reset(); mock.restoreAll(); daemon.close(); };
   const sondeo = () => espiaSet.mock.calls.find((c) => c.arguments[1] === 3000)?.result;
   return { state, daemon, client, sondeo, visible, vers, listas, avanzar, lista3, abrir, cerrar, llamadas };
 }
@@ -415,7 +417,7 @@ test("ia: un subagente trabajando lleva ⋯ en la lista, no ●", async () => {
     await until(() => /sub:1/.test(t.visible()));
     assert.match(t.visible(), /⋯ sub:1/);
     assert.doesNotMatch(t.visible(), /● sub:1 ·/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: sin recuadro (una ventana, sin lista) una fuente muestra su estado y nombre", async () => {
@@ -429,7 +431,7 @@ test("ia: sin recuadro (una ventana, sin lista) una fuente muestra su estado y n
     await tick(80);
     assert.doesNotMatch(t.visible(), /Sesiones/);
     assert.match(t.visible(), /✓ sub:1 · (?:terminó|finished)/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: si la lista no entra, el aviso de arranque manda a agrandar la terminal", async () => {
@@ -439,7 +441,7 @@ test("ia: si la lista no entra, el aviso de arranque manda a agrandar la termina
     await until(() => /sub:1 (?:arrancó|started)/.test(t.visible()));
     assert.match(t.visible(), /(?:agrandá la terminal y F2 para verlo|enlarge the terminal and F2 to see it)/);
     assert.doesNotMatch(t.visible(), /\/sesiones/);
-  } finally { t.daemon.close(); }
+  } finally { t.cerrar(); }
 });
 
 test("ia: un harness vivo de otra sesión va debajo de ESA sesión y se sigue con su Harnesses", async () => {

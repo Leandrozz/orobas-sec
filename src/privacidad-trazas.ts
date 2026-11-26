@@ -37,19 +37,20 @@ export const masRestrictivo = (a: ModoTrazas, b: ModoTrazas | undefined): ModoTr
 // Igual que providers.configPath; se repite para no cargar los proveedores desde acá (llm.ts nos importa).
 const rutaConfig = () => process.env.CYBER_CONFIG || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "elevate-cyber", "config.json");
 
-let leido: { ruta: string; mtime: number; modo: ModoTrazas | undefined } | undefined;
+// La clave es mtime y tamaño: dos escrituras dentro del mismo tick del reloj del kernel (milisegundos) dejan el mismo mtime.
+let leido: { ruta: string; mtime: number; tamano: number; modo: ModoTrazas | undefined } | undefined;
 /** «trazas» de la configuración. Un archivo que existe y no se entiende cuenta como «no». */
 function modoDeConfig(): ModoTrazas | undefined {
   const ruta = rutaConfig();
-  let mtime: number;
-  try { mtime = statSync(ruta).mtimeMs; } catch { return undefined; }
-  if (leido?.ruta === ruta && leido.mtime === mtime) return leido.modo;
+  let mtime: number, tamano: number;
+  try { ({ mtimeMs: mtime, size: tamano } = statSync(ruta)); } catch { return undefined; }
+  if (leido?.ruta === ruta && leido.mtime === mtime && leido.tamano === tamano) return leido.modo;
   let modo: ModoTrazas | undefined;
   try {
     const config = JSON.parse(readFileSync(ruta, "utf8").replace(/^\uFEFF/, "")) as { trazas?: unknown };
     modo = leerModo(config?.trazas);
   } catch { modo = "no"; }
-  leido = { ruta, mtime, modo };
+  leido = { ruta, mtime, tamano, modo };
   return modo;
 }
 
@@ -98,6 +99,7 @@ export function guardarModoTrazas(modo: ModoTrazas): string | undefined {
   try {
     mkdirSync(dirname(ruta), { recursive: true });
     writeFileSync(ruta, `${JSON.stringify(config, null, 2)}\n`);
+    leido = undefined; // lo que acabamos de escribir se relee aunque el mtime no haya cambiado
   } catch (error) {
     return `No pude guardar en ${ruta}: ${(error as Error).message}.`;
   }

@@ -17,8 +17,10 @@ beforeEach(() => {
   process.env.PATH = mkdtempSync(join(tmpdir(), "path-"));
   process.env.CYBER_SECRETS_KEY = key();
 });
+// Se restaura en el lugar: reemplazar process.env por un objeto común desconecta los cambios de PATH de los procesos hijos.
 afterEach(() => {
-  process.env = { ...saved };
+  for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+  Object.assign(process.env, saved);
 });
 
 test("t(): español con LANG=es, inglés si no", () => {
