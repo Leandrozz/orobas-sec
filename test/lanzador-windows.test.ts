@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ const hash = (ruta: string) => createHash("sha256").update(ruta).digest("hex").s
 
 const hayPwsh = spawnSync("pwsh", ["-NoProfile", "-Command", "1"]).status === 0;
 const skip = !hayPwsh && "pwsh no está en el PATH";
+/** pwsh puede vivir junto a docker (en los runners de GitHub, los dos en /usr/bin): «sin docker» igual tiene que encontrarlo. */
+const pwshEnPath = process.env.PATH!.split(":").map((p) => join(p, "pwsh")).find((p) => existsSync(p));
 const ps1 = join(process.cwd(), "distro/lanzador/cyber.ps1");
 
 // docker falso: anota cada invocación en args.log y responde según FAKE_*
@@ -68,7 +70,12 @@ function correr(opts: { env?: NodeJS.ProcessEnv; args?: string[]; previo?: strin
   }
   const proyecto = join(dir, "Mis objetivos");
   mkdirSync(proyecto, { recursive: true });
-  const sinDocker = process.env.PATH!.split(":").filter((p) => !existsSync(join(p, "docker"))).join(":");
+  const soloPwsh = join(dir, "solo-pwsh");
+  if (opts.sinDocker && pwshEnPath && !existsSync(soloPwsh)) {
+    mkdirSync(soloPwsh);
+    symlinkSync(pwshEnPath, join(soloPwsh, "pwsh"));
+  }
+  const sinDocker = [soloPwsh, ...process.env.PATH!.split(":").filter((p) => !existsSync(join(p, "docker")))].join(":");
   const r = spawnSync("pwsh", ["-NoProfile", "-File", opts.script ?? ps1, ...(opts.args ?? [])], {
     cwd: proyecto,
     input: opts.input ?? "",
@@ -234,8 +241,11 @@ test("lanzador windows: --instalar alcanza con el .ps1 solo: escribe el cyber.cm
 
 test("lanzador windows: --instalar avisa si un perfil de PowerShell define su propio cyber", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "cyber-ps-"));
-  mkdirSync(join(dir, "WindowsPowerShell"));
-  writeFileSync(join(dir, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"), 'function cyber { docker run -it --rm -v "${PWD}:/proyecto" ghcr.io/ejemplo/vieja @args }\n');
+  // «Mis documentos» de pwsh en Linux depende de su .NET: ~/Documents (si existe) o HOME. El perfil va en las dos.
+  for (const docs of [join(dir, "Documents"), dir]) {
+    mkdirSync(join(docs, "WindowsPowerShell"), { recursive: true });
+    writeFileSync(join(docs, "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"), 'function cyber { docker run -it --rm -v "${PWD}:/proyecto" ghcr.io/ejemplo/vieja @args }\n');
+  }
   const { r } = correr({ dir, args: ["--instalar"], sinDocker: true });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /define su propio «cyber»|defines its own "cyber"/);
